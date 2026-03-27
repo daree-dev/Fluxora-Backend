@@ -4,11 +4,15 @@ import { streamsRouter } from './routes/streams.js';
 import { healthRouter } from './routes/health.js';
 import { correlationIdMiddleware } from './middleware/correlationId.js';
 import { requestLoggerMiddleware } from './middleware/requestLogger.js';
+import { HealthCheckManager } from './config/health.js';
 
 export const app = express();
 
+// Wire health manager into app.locals so routes can access it
+const healthManager = new HealthCheckManager();
+app.locals.healthManager = healthManager;
+
 app.use(express.json());
-// Correlation ID must be first so all subsequent middleware and routes have req.correlationId.
 app.use(correlationIdMiddleware);
 app.use(requestLoggerMiddleware);
 

@@ -1,279 +1,108 @@
 import { describe, it, expect, beforeEach } from '@jest/globals';
-import {
-    HealthCheckManager,
-    HealthChecker,
-    HealthStatus,
-    createDatabaseHealthChecker,
-    createRedisHealthChecker,
-    createHorizonHealthChecker,
-} from './health';
+import { HealthCheckManager } from './health';
+import type { HealthChecker } from './health';
 
-describe('Health Check Manager', () => {
-    let manager: HealthCheckManager;
+describe('HealthCheckManager', () => {
+  let manager: HealthCheckManager;
 
-    beforeEach(() => {
-        manager = new HealthCheckManager();
+  beforeEach(() => {
+    manager = new HealthCheckManager();
+  });
+
+  const makeChecker = (name: string, error?: string): HealthChecker => ({
+    name,
+    async check() { return { latency: 5, ...(error ? { error } : {}) }; },
+  });
+
+  const throwingChecker = (name: string, value: unknown = new Error('Unexpected error')): HealthChecker => ({
+    name,
+    async check() { throw value; },
+  });
+
+  describe('registerChecker', () => {
+    it('registers a checker and appears in getLastReport', () => {
+      manager.registerChecker(makeChecker('test'));
+      expect(manager.getLastReport().dependencies).toHaveProperty('test');
     });
 
-    describe('registerChecker', () => {
-        it('should register a health checker', () => {
-            const checker: HealthChecker = {
-                name: 'test',
-                async check() {
-                    return { latency: 10 };
-                },
-            };
+    it('registers multiple checkers', () => {
+      manager.registerChecker(makeChecker('a'));
+      manager.registerChecker(makeChecker('b'));
+      expect(Object.keys(manager.getLastReport().dependencies)).toHaveLength(2);
+    });
+  });
 
-            manager.registerChecker(checker);
-            const report = manager.getLastReport('0.1.0');
-
-            expect(report.dependencies).toHaveLength(1);
-            expect(report.dependencies[0].name).toBe('test');
-        });
-
-        it('should register multiple checkers', () => {
-            const checker1: HealthChecker = {
-                name: 'service1',
-                async check() {
-                    return { latency: 10 };
-                },
-            };
-
-            const checker2: HealthChecker = {
-                name: 'service2',
-                async check() {
-                    return { latency: 20 };
-                },
-            };
-
-            manager.registerChecker(checker1);
-            manager.registerChecker(checker2);
-
-            const report = manager.getLastReport('0.1.0');
-            expect(report.dependencies).toHaveLength(2);
-        });
+  describe('checkAll', () => {
+    it('returns healthy when all checkers pass', async () => {
+      manager.registerChecker(makeChecker('postgres'));
+      manager.registerChecker(makeChecker('stellar_rpc'));
+      const report = await manager.checkAll();
+      expect(report.status).toBe('healthy');
+      expect(report.dependencies).toEqual({ postgres: 'healthy', stellar_rpc: 'healthy' });
     });
 
-    describe('checkAll', () => {
-        it('should run all health checks', async () => {
-            const checker: HealthChecker = {
-                name: 'test',
-                async check() {
-                    return { latency: 5 };
-                },
-            };
-
-            manager.registerChecker(checker);
-            const report = await manager.checkAll();
-
-            expect(report.status).toBe('healthy');
-            expect(report.dependencies).toHaveLength(1);
-            expect(report.dependencies[0].latency).toBe(5);
-        });
-
-        it('should mark unhealthy when checker returns error', async () => {
-            const checker: HealthChecker = {
-                name: 'failing',
-                async check() {
-                    return { latency: 100, error: 'Connection refused' };
-                },
-            };
-
-            manager.registerChecker(checker);
-            const report = await manager.checkAll();
-
-            expect(report.status).toBe('unhealthy');
-            expect(report.dependencies[0].status).toBe('unhealthy');
-            expect(report.dependencies[0].error).toBe('Connection refused');
-        });
-
-        it('should mark unhealthy when checker throws', async () => {
-            const checker: HealthChecker = {
-                name: 'throwing',
-                async check() {
-                    throw new Error('Unexpected error');
-                },
-            };
-
-            manager.registerChecker(checker);
-            const report = await manager.checkAll();
-
-            expect(report.status).toBe('unhealthy');
-            expect(report.dependencies[0].status).toBe('unhealthy');
-            expect(report.dependencies[0].error).toBe('Unexpected error');
-        });
-
-        it('should aggregate status correctly', async () => {
-            const healthy: HealthChecker = {
-                name: 'healthy',
-                async check() {
-                    return { latency: 5 };
-                },
-            };
-
-            const unhealthy: HealthChecker = {
-                name: 'unhealthy',
-                async check() {
-                    return { latency: 100, error: 'Failed' };
-                },
-            };
-
-            manager.registerChecker(healthy);
-            manager.registerChecker(unhealthy);
-
-            const report = await manager.checkAll();
-            expect(report.status).toBe('unhealthy');
-        });
-
-        it('should include uptime in report', async () => {
-            const checker: HealthChecker = {
-                name: 'test',
-                async check() {
-                    return { latency: 5 };
-                },
-            };
-
-            manager.registerChecker(checker);
-            const report = await manager.checkAll();
-
-            expect(report.uptime).toBeGreaterThanOrEqual(0);
-            expect(typeof report.uptime).toBe('number');
-        });
-
-        it('should include timestamp in report', async () => {
-            const checker: HealthChecker = {
-                name: 'test',
-                async check() {
-                    return { latency: 5 };
-                },
-            };
-
-            manager.registerChecker(checker);
-            const report = await manager.checkAll();
-
-            expect(report.timestamp).toBeDefined();
-            expect(new Date(report.timestamp).getTime()).toBeGreaterThan(0);
-        });
-
-        it('should include version in report', async () => {
-            const checker: HealthChecker = {
-                name: 'test',
-                async check() {
-                    return { latency: 5 };
-                },
-            };
-
-            manager.registerChecker(checker);
-            const report = await manager.checkAll();
-
-            expect(report.version).toBe('0.1.0');
-        });
+    it('returns unhealthy when a checker returns an error', async () => {
+      manager.registerChecker(makeChecker('postgres', 'Connection refused'));
+      const report = await manager.checkAll();
+      expect(report.status).toBe('unhealthy');
+      expect(report.dependencies.postgres).toBe('unhealthy');
     });
 
-    describe('getLastReport', () => {
-        it('should return cached report', async () => {
-            const checker: HealthChecker = {
-                name: 'test',
-                async check() {
-                    return { latency: 5 };
-                },
-            };
-
-            manager.registerChecker(checker);
-            await manager.checkAll();
-
-            const report = manager.getLastReport('0.1.0');
-            expect(report.dependencies).toHaveLength(1);
-            expect(report.status).toBe('healthy');
-        });
-
-        it('should return initial healthy status before first check', () => {
-            const checker: HealthChecker = {
-                name: 'test',
-                async check() {
-                    return { latency: 5 };
-                },
-            };
-
-            manager.registerChecker(checker);
-            const report = manager.getLastReport('0.1.0');
-
-            expect(report.status).toBe('healthy');
-            expect(report.dependencies[0].status).toBe('healthy');
-        });
+    it('returns unhealthy when a checker throws an Error', async () => {
+      manager.registerChecker(throwingChecker('postgres'));
+      const report = await manager.checkAll();
+      expect(report.status).toBe('unhealthy');
+      expect(report.dependencies.postgres).toBe('unhealthy');
     });
 
-    describe('Built-in checkers', () => {
-        it('should create database health checker', async () => {
-            const checker = createDatabaseHealthChecker();
-            expect(checker.name).toBe('database');
-
-            const result = await checker.check();
-            expect(result.latency).toBeGreaterThanOrEqual(0);
-        });
-
-        it('should create redis health checker', async () => {
-            const checker = createRedisHealthChecker();
-            expect(checker.name).toBe('redis');
-
-            const result = await checker.check();
-            expect(result.latency).toBeGreaterThanOrEqual(0);
-        });
-
-        it('should create horizon health checker', async () => {
-            const checker = createHorizonHealthChecker('https://horizon.stellar.org');
-            expect(checker.name).toBe('horizon');
-
-            // Note: This will make a real HTTP request in tests
-            // In production, you'd mock this
-            const result = await checker.check();
-            expect(result.latency).toBeGreaterThanOrEqual(0);
-        });
+    it('returns unhealthy when a checker throws a non-Error value', async () => {
+      manager.registerChecker(throwingChecker('postgres', 'raw string'));
+      const report = await manager.checkAll();
+      expect(report.dependencies.postgres).toBe('unhealthy');
     });
 
-    describe('Status aggregation', () => {
-        it('should return healthy when all dependencies are healthy', async () => {
-            const checker1: HealthChecker = {
-                name: 'service1',
-                async check() {
-                    return { latency: 5 };
-                },
-            };
-
-            const checker2: HealthChecker = {
-                name: 'service2',
-                async check() {
-                    return { latency: 10 };
-                },
-            };
-
-            manager.registerChecker(checker1);
-            manager.registerChecker(checker2);
-
-            const report = await manager.checkAll();
-            expect(report.status).toBe('healthy');
-        });
-
-        it('should return unhealthy when any dependency is unhealthy', async () => {
-            const checker1: HealthChecker = {
-                name: 'service1',
-                async check() {
-                    return { latency: 5 };
-                },
-            };
-
-            const checker2: HealthChecker = {
-                name: 'service2',
-                async check() {
-                    return { latency: 100, error: 'Failed' };
-                },
-            };
-
-            manager.registerChecker(checker1);
-            manager.registerChecker(checker2);
-
-            const report = await manager.checkAll();
-            expect(report.status).toBe('unhealthy');
-        });
+    it('aggregates: unhealthy wins over healthy', async () => {
+      manager.registerChecker(makeChecker('a'));
+      manager.registerChecker(makeChecker('b', 'fail'));
+      expect((await manager.checkAll()).status).toBe('unhealthy');
     });
+
+    it('includes uptime as a non-negative number', async () => {
+      manager.registerChecker(makeChecker('x'));
+      expect((await manager.checkAll()).uptime).toBeGreaterThanOrEqual(0);
+    });
+
+    it('includes a valid ISO timestamp', async () => {
+      manager.registerChecker(makeChecker('x'));
+      expect(new Date((await manager.checkAll()).timestamp).getTime()).toBeGreaterThan(0);
+    });
+
+    it('includes version', async () => {
+      manager.registerChecker(makeChecker('x'));
+      expect((await manager.checkAll('1.2.3')).version).toBe('1.2.3');
+    });
+  });
+
+  describe('getLastReport', () => {
+    it('returns initial healthy status before first checkAll', () => {
+      manager.registerChecker(makeChecker('x'));
+      const report = manager.getLastReport();
+      expect(report.status).toBe('healthy');
+      expect(report.dependencies.x).toBe('healthy');
+    });
+
+    it('reflects results after checkAll', async () => {
+      manager.registerChecker(makeChecker('x', 'fail'));
+      await manager.checkAll();
+      expect(manager.getLastReport().dependencies.x).toBe('unhealthy');
+    });
+
+    it('returns degraded when a dependency is in degraded state', () => {
+      manager.registerChecker(makeChecker('dep'));
+      // Directly set degraded state to exercise the aggregation branch
+      (manager as unknown as { lastResults: Map<string, { name: string; status: string; lastChecked: string }> })
+        .lastResults.set('dep', { name: 'dep', status: 'degraded', lastChecked: new Date().toISOString() });
+      expect(manager.getLastReport().status).toBe('degraded');
+    });
+  });
 });

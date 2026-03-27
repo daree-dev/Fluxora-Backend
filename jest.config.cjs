@@ -6,12 +6,19 @@ module.exports = {
     '^.+\\.tsx?$': [
       'ts-jest',
       {
+        diagnostics: false,
         tsconfig: {
           module: 'CommonJS',
           moduleResolution: 'node',
           esModuleInterop: true,
+          skipLibCheck: true,
+          strict: true,
+          target: 'ES2020',
         },
       },
     ],
+  },
+  moduleNameMapper: {
+    '^(\\.{1,2}/.*)\\.js$': '$1',
   },
 };

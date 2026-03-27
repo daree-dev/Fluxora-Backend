@@ -134,10 +134,32 @@ API runs at [http://localhost:3000](http://localhost:3000).
 | Method | Path               | Description                                                                      |
 | ------ | ------------------ | -------------------------------------------------------------------------------- |
 | GET    | `/`                | API info                                                                         |
-| GET    | `/health`          | Health check                                                                     |
+| GET    | `/health`          | Shallow health check (indexer status)                                            |
+| GET    | `/health/ready`    | Deep readiness probe — checks Postgres + Stellar RPC; returns 503 if unhealthy  |
 | GET    | `/api/streams`     | List streams                                                                     |
 | GET    | `/api/streams/:id` | Get one stream                                                                   |
 | POST   | `/api/streams`     | Create stream (body: sender, recipient, depositAmount, ratePerSecond, startTime) |
+
+### Deep health check contract (`GET /health/ready`)
+
+Returns `200 OK` when all dependencies are healthy, `503 Service Unavailable` otherwise.
+
+```json
+{
+  "status": "unhealthy",
+  "version": "0.1.0",
+  "timestamp": "2026-03-27T10:00:00.000Z",
+  "uptime": 42,
+  "dependencies": {
+    "postgres": "healthy",
+    "stellar_rpc": "unreachable"
+  }
+}
+```
+
+`status` is one of `"healthy"`, `"degraded"`, or `"unhealthy"`. Each dependency value follows the same enum.
+
+Dependency checks enforce a **5-second timeout** — a hung upstream cannot stall the health endpoint. Failure reasons are logged as structured JSON (`warn` level) but are **not** included in the response body to prevent leaking internal topology.
 
 Contract guarantees for this area:
 

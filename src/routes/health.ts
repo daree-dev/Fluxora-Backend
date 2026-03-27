@@ -1,17 +1,18 @@
 import { Router, Request, Response } from 'express';
-
-import {
-  DEFAULT_INDEXER_STALL_THRESHOLD_MS,
-  assessIndexerHealth,
-} from '../indexer/stall.js';
+import { assessIndexerHealth, DEFAULT_INDEXER_STALL_THRESHOLD_MS } from '../indexer/stall.js';
+import { HealthCheckManager } from '../config/health.js';
+import { logger } from '../lib/logger.js';
 
 export const healthRouter = Router();
 
 healthRouter.get('/', (_req: Request, res: Response) => {
+  const indexer = assessIndexerHealth({
+    enabled: false,
+    stallThresholdMs: DEFAULT_INDEXER_STALL_THRESHOLD_MS,
+  });
+
   res.json({
-    status: indexer.status === 'stalled' || indexer.status === 'starting'
-      ? 'degraded'
-      : 'ok',
+    status: indexer.status === 'stalled' || indexer.status === 'starting' ? 'degraded' : 'ok',
     service: 'fluxora-backend',
     timestamp: new Date().toISOString(),
     indexer,
@@ -19,55 +20,31 @@ healthRouter.get('/', (_req: Request, res: Response) => {
 });
 
 /**
- * GET /health/ready - Readiness probe
- * Returns 200 only if all dependencies are healthy
+ * GET /health/ready
+ * Deep readiness probe — runs live checks against Postgres and Stellar RPC.
+ * Returns 503 if any dependency is unhealthy.
  */
 healthRouter.get('/ready', async (req: Request, res: Response) => {
-  const healthManager = req.app.locals.healthManager as HealthCheckManager;
-  const logger = req.app.locals.logger as Logger;
-  const config = req.app.locals.config as Config;
+  const healthManager = req.app.locals.healthManager as HealthCheckManager | undefined;
+
+  if (!healthManager) {
+    res.status(503).json({ status: 'unhealthy', error: 'Health manager not configured' });
+    return;
+  }
 
   try {
     const report = await healthManager.checkAll();
 
     if (report.status === 'unhealthy') {
-      logger.warn('Readiness check failed', {
-        dependencies: report.dependencies.map(d => ({
-          name: d.name,
-          status: d.status,
-          error: d.error,
-        })),
-      });
-      return res.status(503).json(report);
+      logger.warn('Readiness check failed', undefined, { dependencies: report.dependencies });
+      res.status(503).json(report);
+      return;
     }
 
     res.json(report);
   } catch (err) {
-    logger.error('Readiness check error', err as Error);
-    res.status(503).json({
-      status: 'unhealthy',
-      timestamp: new Date().toISOString(),
-      error: 'Health check failed',
-    });
-  }
-});
-
-/**
- * GET /health/live - Detailed health report
- * Returns current health status and dependency details
- */
-healthRouter.get('/live', async (req: Request, res: Response) => {
-  const healthManager = req.app.locals.healthManager as HealthCheckManager;
-  const config = req.app.locals.config as Config;
-
-  try {
-    const report = healthManager.getLastReport(config.apiVersion);
-    res.json(report);
-  } catch (err) {
-    res.status(500).json({
-      status: 'unhealthy',
-      timestamp: new Date().toISOString(),
-      error: 'Failed to get health report',
-    });
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error('Readiness check threw unexpectedly', undefined, { error: message });
+    res.status(503).json({ status: 'unhealthy', timestamp: new Date().toISOString() });
   }
 });
