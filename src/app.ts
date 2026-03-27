@@ -3,15 +3,19 @@ import type { Request, Response, NextFunction } from 'express';
 import { streamsRouter } from './routes/streams.js';
 import { healthRouter } from './routes/health.js';
 import { indexerRouter } from './routes/indexer.js';
+import { authRouter } from './routes/auth.js';
 import { correlationIdMiddleware } from './middleware/correlationId.js';
 import { corsAllowlistMiddleware } from './middleware/cors.js';
 import { requestLoggerMiddleware } from './middleware/requestLogger.js';
 import { isShuttingDown } from './shutdown.js';
+import { errorHandler } from './middleware/errorHandler.js';
 
 export interface AppOptions {
   /** When true, mounts a /__test/error route that throws unconditionally. */
   includeTestRoutes?: boolean;
 }
+
+export const app = express();
 
 app.use(express.json({ limit: '256kb' }));
 // Correlation ID must be first so all subsequent middleware and routes have req.correlationId.
@@ -30,6 +34,7 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
 
 app.use('/health', healthRouter);
 app.use('/api/streams', streamsRouter);
+app.use('/api/auth', authRouter);
 app.use('/internal/indexer', indexerRouter);
 
 app.get('/', (_req: any, res: any) => {

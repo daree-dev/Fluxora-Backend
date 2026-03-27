@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import {
   validateDecimalString,
   validateAmountFields,
@@ -12,8 +12,8 @@ import {
   serviceUnavailable,
   asyncHandler,
 } from '../middleware/errorHandler.js';
-import { requireAuth } from '../middleware/auth.js';
-import { SerializationLogger, info, debug } from '../utils/logger.js';
+import { authenticate, requireAuth } from '../middleware/auth.js';
+import { SerializationLogger, info, debug, warn } from '../utils/logger.js';
 import { recordAuditEvent } from '../lib/auditLog.js';
 
 /**
@@ -231,8 +231,12 @@ export const streamsRouter = Router();
 // Amount fields that must be decimal strings per serialization policy
 const AMOUNT_FIELDS = ['depositAmount', 'ratePerSecond'] as const;
 
+function successResponse(data: any) {
+  return { ...data };
+}
+
 // In-memory stream store (placeholder for DB integration)
-export const streams: Array<{
+export interface Stream {
   id: string;
   sender: string;
   recipient: string;
@@ -244,7 +248,7 @@ export const streams: Array<{
 }
 
 // In-memory stream store — placeholder until PostgreSQL integration lands
-const streams: Stream[] = [];
+export const streams: Stream[] = [];
 
 type StreamsCursor = {
   v: 1;
@@ -487,7 +491,7 @@ function fingerprintCreateStreamInput(input: NormalizedCreateStreamInput): strin
 streamsRouter.get(
   '/',
   asyncHandler(async (req: any, res: any) => {
-    const requestId = (req as { id?: string }).id;
+    const requestId = (req as any).requestId || res.locals.requestId || req.get('x-request-id') || (req as any).id || (req as any).correlationId;
     const limit = parseLimit(req.query.limit);
     const cursor = parseCursor(req.query.cursor);
     const includeTotal = parseIncludeTotal(req.query.include_total);
@@ -509,7 +513,7 @@ streamsRouter.get(
     const pageStreams = sortedStreams.slice(normalizedStartIndex, normalizedStartIndex + limit);
     const hasMore = normalizedStartIndex + pageStreams.length < sortedStreams.length;
     const nextCursor = hasMore && pageStreams.length > 0
-      ? encodeCursor(pageStreams[pageStreams.length - 1].id)
+      ? encodeCursor(pageStreams[pageStreams.length - 1]!.id)
       : undefined;
 
     info('Listing streams with pagination', {
@@ -534,6 +538,7 @@ streamsRouter.get(
       has_more: boolean;
       total?: number;
       next_cursor?: string;
+      requestId?: string;
     } = {
       streams: pageStreams,
       has_more: hasMore,
@@ -547,6 +552,8 @@ streamsRouter.get(
       response.next_cursor = nextCursor;
     }
 
+    response.requestId = requestId;
+
     res.json(response);
   })
 );
@@ -559,14 +566,14 @@ streamsRouter.get(
   '/:id',
   asyncHandler(async (req: any, res: any) => {
     const { id } = req.params;
-    const requestId = (req as { id?: string }).id;
+    const requestId = (req as any).requestId || res.locals.requestId || req.get('x-request-id') || (req as any).id || (req as any).correlationId;
 
     debug('Fetching stream', { id });
 
     const stream = streams.find((s) => s.id === id);
     if (!stream) throw notFound('Stream', id);
 
-    res.json(successResponse({ stream }));
+    res.json(successResponse({ stream, requestId }));
   })
 );
 
@@ -576,10 +583,11 @@ streamsRouter.get(
  */
 streamsRouter.post(
   '/',
+  authenticate,
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
     const { sender, recipient, depositAmount, ratePerSecond, startTime, endTime } = req.body ?? {};
-    const requestId = (req as { id?: string }).id;
+    const requestId = (req as any).requestId || res.locals.requestId || req.get('x-request-id') || (req as any).id || (req as any).correlationId;
     const idempotencyKey = parseIdempotencyKey(req.header('Idempotency-Key'));
 
     if (idempotencyDependency.state !== 'healthy') {
@@ -669,7 +677,10 @@ streamsRouter.post(
 
     res.set('Idempotency-Key', idempotencyKey);
     res.set('Idempotency-Replayed', 'false');
-    res.status(201).json(stream);
+    res.status(201).json({
+      ...stream,
+      requestId: (req as any).requestId || res.locals.requestId || req.get('x-request-id') || (req as any).id || (req as any).correlationId,
+    });
   }),
 );
 
@@ -679,6 +690,7 @@ streamsRouter.post(
  */
 streamsRouter.delete(
   '/:id',
+  authenticate,
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
@@ -708,7 +720,7 @@ streamsRouter.delete(
 
     info('Stream cancelled', { id });
 
-    recordAuditEvent('STREAM_CANCELLED', 'stream', id, req.correlationId);
+    recordAuditEvent('STREAM_CANCELLED', 'stream', id as string, req.correlationId as string);
 
     res.json({ message: 'Stream cancelled', id });
   })
