@@ -1,16 +1,12 @@
 import express from 'express';
-import type { Request, Response } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import { streamsRouter } from './routes/streams.js';
 import { healthRouter } from './routes/health.js';
+import { indexerRouter } from './routes/indexer.js';
 import { correlationIdMiddleware } from './middleware/correlationId.js';
+import { corsAllowlistMiddleware } from './middleware/cors.js';
 import { requestLoggerMiddleware } from './middleware/requestLogger.js';
-import { createRateLimiter } from './middleware/rateLimit.js';
-import { idempotencyMiddleware } from './middleware/idempotency.js';
-import {
-  requestIdMiddleware,
-  notFoundHandler,
-  errorHandler,
-} from './errors.js';
+import { isShuttingDown } from './shutdown.js';
 
 export interface AppOptions {
   /** When true, mounts a /__test/error route that throws unconditionally. */
@@ -19,44 +15,40 @@ export interface AppOptions {
   payloadLimitBytes?: number;
 }
 
-export function createApp(options: AppOptions = {}): express.Express {
-  const application = express();
+app.use(express.json({ limit: '256kb' }));
+// Correlation ID must be first so all subsequent middleware and routes have req.correlationId.
+app.use(correlationIdMiddleware);
+app.use(corsAllowlistMiddleware);
+app.use(requestLoggerMiddleware);
 
-  // Security headers — applied before any route handler
-  application.use((_req: Request, res: Response, next) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('X-XSS-Protection', '0'); // modern browsers ignore this; CSP is the right control
-    next();
-  });
-
-  const payloadLimit = options.payloadLimitBytes ?? 256 * 1024;
-  application.use(express.json({ limit: payloadLimit }));
-  application.use(requestIdMiddleware);
-  application.use(correlationIdMiddleware);
-  application.use(requestLoggerMiddleware);
-
-  application.use('/health', healthRouter);
-  application.use('/api/streams', createRateLimiter({ max: 100, windowSeconds: 60 }), idempotencyMiddleware, streamsRouter);
-
-  application.get('/', (_req: Request, res: Response) => {
-    res.json({
-      name: 'Fluxora API',
-      version: '0.1.0',
-      docs: 'Programmable treasury streaming on Stellar.',
-    });
-  });
-
-  if (options.includeTestRoutes === true) {
-    application.get('/__test/error', () => {
-      throw new Error('forced test error');
-    });
+// During shutdown, tell clients to close the connection after this response
+// so keep-alive connections are not reused and the server can drain quickly.
+app.use((_req: Request, res: Response, next: NextFunction) => {
+  if (isShuttingDown()) {
+    res.setHeader('Connection', 'close');
   }
+  next();
+});
 
-  application.use(notFoundHandler);
-  application.use(errorHandler);
+app.use('/health', healthRouter);
+app.use('/api/streams', streamsRouter);
+app.use('/internal/indexer', indexerRouter);
 
-  return application;
-}
+app.get('/', (_req: any, res: any) => {
+  res.json({
+    name: 'Fluxora API',
+    version: '0.1.0',
+    docs: 'Programmable treasury streaming on Stellar.',
+  });
+});
 
-export const app = createApp();
+app.use((_req: any, res: any) => {
+  res.status(404).json({
+    error: {
+      code: 'NOT_FOUND',
+      message: 'The requested resource was not found',
+    },
+  });
+});
+
+app.use(errorHandler);
