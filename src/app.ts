@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import { streamsRouter } from './routes/streams.js';
 import { healthRouter } from './routes/health.js';
 import { correlationIdMiddleware } from './middleware/correlationId.js';
+import { corsAllowlistMiddleware } from './middleware/cors.js';
 import { requestLoggerMiddleware } from './middleware/requestLogger.js';
 
 export const app = express();
@@ -10,6 +11,7 @@ export const app = express();
 app.use(express.json());
 // Correlation ID must be first so all subsequent middleware and routes have req.correlationId.
 app.use(correlationIdMiddleware);
+app.use(corsAllowlistMiddleware);
 app.use(requestLoggerMiddleware);
 
 app.use('/health', healthRouter);

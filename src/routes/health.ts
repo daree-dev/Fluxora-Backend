@@ -9,11 +9,16 @@ export const healthRouter = Router();
 
 healthRouter.get('/', (_req: Request, res: Response) => {
   const indexer = assessIndexerHealth({
+<<<<<<< Updated upstream
     enabled: process.env.INDEXER_ENABLED === 'true',
     lastSuccessfulSyncAt: process.env.INDEXER_LAST_SYNC_AT,
     stallThresholdMs: process.env.INDEXER_STALL_THRESHOLD_MS
       ? Number(process.env.INDEXER_STALL_THRESHOLD_MS)
       : DEFAULT_INDEXER_STALL_THRESHOLD_MS,
+=======
+    enabled: false,
+    stallThresholdMs: DEFAULT_INDEXER_STALL_THRESHOLD_MS,
+>>>>>>> Stashed changes
   });
 
   res.json({

@@ -10,10 +10,14 @@
     "dev": "tsx watch src/index.ts",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.config.cjs",
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.config.cjs --coverage",
+<<<<<<< Updated upstream
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.config.cjs --watch",
     "docker:build": "docker build -t fluxora-backend:local .",
     "docker:run": "docker run --rm -p 3000:3000 --name fluxora-backend fluxora-backend:local",
     "docker:smoke": "docker run --rm -d --name fluxora-backend-smoke -p 3000:3000 fluxora-backend:local && sleep 3 && curl -fsS http://127.0.0.1:3000/health && docker stop fluxora-backend-smoke"
+=======
+    "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.config.cjs --watch"
+>>>>>>> Stashed changes
   },
   "dependencies": {
     "express": "^4.18.2"
@@ -29,21 +33,5 @@
     "ts-jest": "^29.1.2",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
-  },
-  "jest": {
-    "preset": "ts-jest/presets/default-esm",
-    "extensionsToTreatAsEsm": [".ts"],
-    "moduleNameMapper": {
-      "^(\\.{1,2}/.*)\\.js$": "$1"
-    },
-    "transform": {
-      "^.+\\.tsx?$": [
-        "ts-jest",
-        {
-          "useESM": true
-        }
-      ]
-    },
-    "testEnvironment": "node"
   }
 }

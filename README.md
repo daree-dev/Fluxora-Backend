@@ -83,6 +83,72 @@ npm start
 - No Stellar RPC integration (placeholder for chain interactions)
 - Rate limiting not implemented (future enhancement)
 
+## CORS Policy (Issue #26)
+
+Service-level outcome for this scope:
+
+- Production CORS behavior is explicit and predictable via a configured allowlist.
+- Non-production environments remain permissive to keep local and staging workflows simple.
+
+### Policy definition
+
+- Environment variable: `CORS_ALLOWED_ORIGINS`
+- Format: comma-separated origins, for example:
+  - `CORS_ALLOWED_ORIGINS=https://app.fluxora.io,https://ops.fluxora.io`
+- Production (`NODE_ENV=production`):
+  - Cross-origin requests are only allowed for origins present in `CORS_ALLOWED_ORIGINS`.
+  - Allowed preflight (`OPTIONS`) requests return `204` and include `Access-Control-Allow-*` headers.
+  - Non-allowlisted preflight requests return `403` with `CORS_ORIGIN_DENIED`.
+  - Requests from non-allowlisted origins do not receive `Access-Control-Allow-Origin`.
+- Non-production (`development`, `test`, `staging`):
+  - Incoming `Origin` is reflected to keep integration and QA flows frictionless.
+
+### Trust boundaries for CORS
+
+- Public internet clients:
+  - May read public endpoints.
+  - Browser access is limited by allowlist in production.
+- Authenticated partners:
+  - Must originate from registered partner domains in production.
+  - Must still pass application-level auth once auth middleware is enabled.
+- Administrators:
+  - Maintain and rotate `CORS_ALLOWED_ORIGINS` per deployment.
+  - Validate allowlist changes in staging before production rollout.
+- Internal workers:
+  - Not browser-originated and unaffected by CORS when calling internal services directly.
+
+### Failure modes and expected behavior
+
+- Invalid allowlist format (extra spaces, empty entries): empty entries are ignored; exact origin match is required.
+- Allowlist missing in production: no cross-origin origin is allowed (safe default).
+- Dependency outage (DB, Stellar RPC, worker): CORS policy is still evaluated first; health/error semantics remain unchanged.
+- Partial data / duplicate delivery: outside CORS scope; existing endpoint behavior and error envelopes remain authoritative.
+
+### Observability and incident diagnosis
+
+- Health endpoint: `GET /health` confirms service liveness.
+- Request correlation: `x-correlation-id` supports tracing denied preflight and API calls.
+- Logs: request logger captures method/path/status to inspect spikes in `OPTIONS` or `403` responses.
+- Operator runbook:
+  - Confirm `NODE_ENV` and deployed `CORS_ALLOWED_ORIGINS`.
+  - Reproduce with preflight:
+    - `curl -i -X OPTIONS "$BASE_URL/api/streams" -H "Origin: https://candidate.example" -H "Access-Control-Request-Method: POST"`
+  - If denied unexpectedly, compare exact origin (scheme + host + port) against allowlist.
+
+### Verification evidence
+
+- Automated regression tests in `tests/cors.test.ts` cover:
+  - non-production permissive behavior
+  - production allowlisted preflight success
+  - production denied preflight behavior (`403` + `CORS_ORIGIN_DENIED`)
+  - production safe default when allowlist is unset
+
+### Intentional non-goals for this issue
+
+- Dynamic allowlist management API.
+- Wildcard or pattern-based origin matching.
+- CORS-based authentication (CORS is not auth).
+
 ## What's in this repo
 
 - Implemented today:
