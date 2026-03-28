@@ -370,6 +370,8 @@ npm run k6:stress
 npm run k6:soak
 ```
 
+## Chain-First Model
+
 ## Environment
 
 Optional:
@@ -388,3 +390,4 @@ Likely future additions:
 
 - `fluxora-frontend` - dashboard and recipient UI
 - `fluxora-contracts` - Soroban smart contracts
+```

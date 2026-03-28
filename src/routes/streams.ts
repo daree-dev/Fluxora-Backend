@@ -171,7 +171,45 @@ import { recordAuditEvent } from '../lib/auditLog.js';
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/StreamCreateRequest'
+ *             type: object
+ *             required:
+ *               - transactionHash
+ *               - sender
+ *               - recipient
+ *               - depositAmount
+ *               - ratePerSecond
+ *             properties:
+ *               transactionHash:
+ *                 type: string
+ *                 description: Stellar transaction hash for the stream creation
+ *                 example: "a1b2c3d4..."
+ *               sender:
+ *                 type: string
+ *                 description: Stellar account address of the sender
+ *                 example: "GCSX2..."
+ *               recipient:
+ *                 type: string
+ *                 description: Stellar account address of the recipient
+ *                 example: "GDRX2..."
+ *               depositAmount:
+ *                 type: string
+ *                 description: |
+ *                   Total deposit amount. Must be a decimal string.
+ *                   Example: "1000000.0000000" for 1 million XLM with 7 decimal places.
+ *                 pattern: '^[+-]?\d+(\.\d+)?$'
+ *                 example: "1000000.0000000"
+ *               ratePerSecond:
+ *                 type: string
+ *                 description: |
+ *                   Streaming rate per second as a decimal string.
+ *                   For 1 XLM/day, use "0.0000116" (with 7 decimal precision).
+ *                 pattern: '^[+-]?\d+(\.\d+)?$'
+ *                 example: "0.0000116"
+ *               startTime:
+ *                 type: integer
+ *                 format: int64
+ *                 description: Unix timestamp when the stream should start (optional, defaults to now)
+ *                 example: 1709123456
  *     responses:
  *       201:
  *         description: Stream created successfully
