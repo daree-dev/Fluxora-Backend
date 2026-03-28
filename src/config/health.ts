@@ -1,16 +1,3 @@
-/**
- * Health check module for Fluxora Backend
- * 
- * Provides dependency health status and diagnostic information
- * for operators to diagnose incidents without tribal knowledge.
- * 
- * Failure modes handled:
- * - Database connection timeout/failure
- * - Redis unavailable
- * - Horizon RPC unreachable
- * - Invalid configuration
- */
-
 export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy';
 
 export interface DependencyHealth {
@@ -22,24 +9,19 @@ export interface DependencyHealth {
 }
 
 export interface HealthReport {
-    status: HealthStatus;
-    timestamp: string;
-    uptime: number; // seconds
-    dependencies: DependencyHealth[];
-    version: string;
+  status: HealthStatus;
+  version: string;
+  timestamp: string;
+  uptime: number;
+  /** Flat map: dependencyName → status string, e.g. { postgres: "healthy" } */
+  dependencies: Record<string, string>;
 }
 
-/**
- * Health checker for a single dependency
- */
 export interface HealthChecker {
-    name: string;
-    check(): Promise<{ latency: number; error?: string }>;
+  name: string;
+  check(): Promise<{ latency: number; error?: string }>;
 }
 
-/**
- * Manages health checks for all dependencies
- */
 export class HealthCheckManager {
     private checkers: Map<string, HealthChecker> = new Map();
     private lastResults: Map<string, DependencyHealth> = new Map();
@@ -131,89 +113,29 @@ export class HealthCheckManager {
 
         return 'healthy';
     }
+  }
 
-    /**
-     * Get last known health status (cached)
-     */
-    getLastReport(version: string): HealthReport {
-        const dependencies = Array.from(this.lastResults.values());
-        const status = this.aggregateStatus(dependencies);
-        const uptime = Math.floor((Date.now() - this.startTime) / 1000);
+  private aggregateStatus(deps: DependencyHealth[]): HealthStatus {
+    if (deps.some((d) => d.status === 'unhealthy')) return 'unhealthy';
+    if (deps.some((d) => d.status === 'degraded')) return 'degraded';
+    return 'healthy';
+  }
 
-        return {
-            status,
-            timestamp: new Date().toISOString(),
-            uptime,
-            dependencies,
-            version,
-        };
+  private buildReport(deps: DependencyHealth[], version: string): HealthReport {
+    const dependenciesMap: Record<string, string> = {};
+    for (const d of deps) {
+      dependenciesMap[d.name] = d.status;
     }
-}
-
-/**
- * Create a health checker for database connections
- */
-export function createDatabaseHealthChecker(): HealthChecker {
     return {
-        name: 'database',
-        async check() {
-            // TODO: Implement actual database connection check
-            // For now, return healthy (will be implemented with actual DB)
-            return { latency: 5 };
-        },
+      status: this.aggregateStatus(deps),
+      version,
+      timestamp: new Date().toISOString(),
+      uptime: Math.floor((Date.now() - this.startTime) / 1000),
+      dependencies: dependenciesMap,
     };
-}
+  }
 
-/**
- * Create a health checker for Redis
- */
-export function createRedisHealthChecker(): HealthChecker {
-    return {
-        name: 'redis',
-        async check() {
-            // TODO: Implement actual Redis connection check
-            // For now, return healthy (will be implemented with actual Redis)
-            return { latency: 2 };
-        },
-    };
-}
-
-/**
- * Create a health checker for Horizon RPC
- */
-export function createHorizonHealthChecker(horizonUrl: string): HealthChecker {
-    return {
-        name: 'horizon',
-        async check() {
-            const startTime = Date.now();
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-                try {
-                    const response = await fetch(`${horizonUrl}/health`, {
-                        signal: controller.signal,
-                    });
-
-                    clearTimeout(timeoutId);
-
-                    if (!response.ok) {
-                        return {
-                            latency: Date.now() - startTime,
-                            error: `HTTP ${response.status}`,
-                        };
-                    }
-
-                    return { latency: Date.now() - startTime };
-                } finally {
-                    clearTimeout(timeoutId);
-                }
-            } catch (err) {
-                return {
-                    latency: Date.now() - startTime,
-                    error: err instanceof Error ? err.message : 'Unknown error',
-                };
-            }
-        },
-    };
+  getLastReport(version = '0.1.0'): HealthReport {
+    return this.buildReport(Array.from(this.lastResults.values()), version);
+  }
 }
