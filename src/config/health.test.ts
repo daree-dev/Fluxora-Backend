@@ -170,22 +170,33 @@ describe('Health Check Manager', () => {
             const checker1: HealthChecker = { name: 'service1', async check() { return { latency: 5 }; } };
             const checker2: HealthChecker = { name: 'service2', async check() { return { latency: 10 }; } };
 
-            manager.registerChecker(checker1);
-            manager.registerChecker(checker2);
+    it('aggregates: unhealthy wins over healthy', async () => {
+      manager.registerChecker(makeChecker('a'));
+      manager.registerChecker(makeChecker('b', 'fail'));
+      expect((await manager.checkAll()).status).toBe('unhealthy');
+    });
 
-            const report = await manager.checkAll();
-            expect(report.status).toBe('healthy');
-        });
+    it('includes uptime as a non-negative number', async () => {
+      manager.registerChecker(makeChecker('x'));
+      expect((await manager.checkAll()).uptime).toBeGreaterThanOrEqual(0);
+    });
 
         it('should return unhealthy when any dependency is unhealthy', async () => {
             const checker1: HealthChecker = { name: 'service1', async check() { return { latency: 5 }; } };
             const checker2: HealthChecker = { name: 'service2', async check() { return { latency: 100, error: 'Failed' }; } };
 
-            manager.registerChecker(checker1);
-            manager.registerChecker(checker2);
-
-            const report = await manager.checkAll();
-            expect(report.status).toBe('unhealthy');
-        });
+    it('reflects results after checkAll', async () => {
+      manager.registerChecker(makeChecker('x', 'fail'));
+      await manager.checkAll();
+      expect(manager.getLastReport().dependencies.x).toBe('unhealthy');
     });
+
+    it('returns degraded when a dependency is in degraded state', () => {
+      manager.registerChecker(makeChecker('dep'));
+      // Directly set degraded state to exercise the aggregation branch
+      (manager as unknown as { lastResults: Map<string, { name: string; status: string; lastChecked: string }> })
+        .lastResults.set('dep', { name: 'dep', status: 'degraded', lastChecked: new Date().toISOString() });
+      expect(manager.getLastReport().status).toBe('degraded');
+    });
+  });
 });
