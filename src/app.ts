@@ -6,12 +6,10 @@ import { indexerRouter } from './routes/indexer.js';
 import { correlationIdMiddleware } from './middleware/correlationId.js';
 import { corsAllowlistMiddleware } from './middleware/cors.js';
 import { requestLoggerMiddleware } from './middleware/requestLogger.js';
+import { errorHandler } from './middleware/errorHandler.js';
 import { isShuttingDown } from './shutdown.js';
 
-export interface AppOptions {
-  /** When true, mounts a /__test/error route that throws unconditionally. */
-  includeTestRoutes?: boolean;
-}
+export const app = express();
 
 app.use(express.json({ limit: '256kb' }));
 // Correlation ID must be first so all subsequent middleware and routes have req.correlationId.
