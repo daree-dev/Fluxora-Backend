@@ -21,3 +21,34 @@ healthRouter.get('/', (_req, res) => {
     }
   }));
 });
+
+/**
+ * Readiness check - service can handle requests
+ */
+healthRouter.get("/ready", (_req: Request, res: Response) => {
+  const dbHealth = checkDatabaseHealth();
+  const health = getHealthMetrics();
+
+  const isReady = dbHealth.healthy && health.healthy;
+
+  res.status(isReady ? 200 : 503).json({
+    status: isReady ? "ready" : "not_ready",
+    timestamp: new Date().toISOString(),
+    checks: {
+      database: dbHealth,
+      metrics: health.checks,
+    },
+  });
+});
+
+/**
+ * Metrics endpoint for monitoring
+ */
+healthRouter.get("/metrics", (_req: Request, res: Response) => {
+  const health = getHealthMetrics();
+
+  res.json({
+    timestamp: new Date().toISOString(),
+    ...health,
+  });
+});
