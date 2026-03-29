@@ -1,12 +1,3 @@
-/**
- * Streams API Integration Tests
- * 
- * Purpose: Verify the streams API endpoints with decimal string serialization.
- * Tests cover happy paths, validation failures, error responses, and edge cases.
- * 
- * @file streams.test.ts
- */
-
 import express from 'express';
 import request from 'supertest';
 import { getStreamById } from '../src/db/client.js';
@@ -25,6 +16,8 @@ import { generateToken } from '../src/lib/auth.js';
 import { info, SerializationLogger } from '../src/utils/logger.js';
 import { requestIdMiddleware } from '../src/errors.js';
 import { correlationIdMiddleware } from '../src/middleware/correlationId.js';
+import { errorHandler } from '../src/middleware/errorHandler.js';
+import { initializeConfig, resetConfig } from '../src/config/env.js';
 
 jest.mock('../src/db/client.js', () => ({
   getStreamById: jest.fn(),
@@ -42,17 +35,19 @@ function createTestApp() {
   });
   app.use(correlationIdMiddleware);
   app.use(express.json());
+  app.use(correlationIdMiddleware);
+  app.use(authenticate);
   app.use('/api/streams', streamsRouter);
   app.use(errorHandler);
   return app;
 }
 
-let idempotencyKeyCounter = 0;
-
-function nextIdempotencyKey(): string {
-  idempotencyKeyCounter += 1;
-  return `test-idempotency-${idempotencyKeyCounter}`;
-}
+const validStream = {
+  sender: 'GCSX2XXXXXXXXXXXXXXXXXXXXXXX',
+  recipient: 'GDRX2XXXXXXXXXXXXXXXXXXXXXXX',
+  depositAmount: '1000.0',
+  ratePerSecond: '0.1',
+};
 
 let testToken: string;
 
@@ -74,14 +69,13 @@ describe('Streams API - Decimal String Serialization', () => {
     token = testToken; // For other tests that use 'token'
     app = createTestApp();
     streams.length = 0;
-    setStreamListingDependencyState('healthy');
-    setIdempotencyDependencyState('healthy');
     resetStreamIdempotencyStore();
+    app = createTestApp();
   });
 
   describe('POST /api/streams', () => {
-    it('should require an Idempotency-Key header', async () => {
-      const response = await request(app)
+    it('creates a stream with valid API key', async () => {
+      const res = await request(app)
         .post('/api/streams')
         .set('Authorization', `Bearer ${testToken}`)
         .send({

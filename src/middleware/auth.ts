@@ -4,10 +4,10 @@ import { ApiError, ApiErrorCode } from './errorHandler.js';
 import { warn, info, debug } from '../utils/logger.js';
 
 /**
- * Middleware to optionally authenticate a request via JWT.
- * If a valid token is present, it attaches the user payload to `req.user`.
- * If an invalid token is present, it returns 401.
- * If no token is present, it proceeds without `req.user`.
+ * Middleware to optionally authenticate a request via JWT or API Key.
+ * If a valid token/key is present, it attaches relevant data to `req.user`.
+ * If an invalid token/key is present, it returns 401.
+ * If neither is present, it proceeds without `req.user`.
  */
 export function authenticate(req: Request, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
@@ -15,35 +15,54 @@ export function authenticate(req: Request, res: Response, next: NextFunction): v
 
   debug('Authentication middleware triggered', { hasAuthHeader: !!authHeader, requestId });
 
-  if (!authHeader) {
-    next();
-    return;
-  }
-
-  const [type, token] = authHeader.split(' ');
-
-  if (type !== 'Bearer' || !token) {
-    warn('Invalid Authorization header format', { requestId });
-    next(); // Or should we fail? Requirement says "Optional". 
-    // But if they PROVIDE a header, it should be valid.
-    return;
-  }
-
-  try {
-    const payload = verifyToken(token);
-    req.user = payload;
-    info('User authenticated', { address: payload.address, requestId });
-    next();
-  } catch (error) {
-    warn('Authentication failed', { error: error instanceof Error ? error.message : String(error), requestId });
+  // 1. Try API Key first (common for server-to-server)
+  if (apiKey) {
+    if (isValidApiKey(apiKey)) {
+      req.user = { address: 'system', role: 'service' } as any;
+      info('Service authenticated via API Key', { requestId });
+      return next();
+    }
+    
+    warn('Invalid API Key provided', { requestId });
     res.status(401).json({
       error: {
-        code: ApiErrorCode.UNAUTHORIZED || 'UNAUTHORIZED',
-        message: 'Invalid or expired authentication token',
+        code: ApiErrorCode.UNAUTHORIZED,
+        message: 'Invalid API Key',
         requestId,
       },
     });
+    return;
   }
+
+  // 2. Try JWT if no API Key or if preference is given to JWT
+  if (authHeader) {
+    const [type, token] = authHeader.split(' ');
+
+    if (type !== 'Bearer' || !token) {
+      warn('Invalid Authorization header format', { requestId });
+      return next();
+    }
+
+    try {
+      const payload = verifyToken(token);
+      req.user = payload;
+      info('User authenticated via JWT', { address: payload.address, requestId });
+      return next();
+    } catch (error) {
+      warn('JWT authentication failed', { error: error instanceof Error ? error.message : String(error), requestId });
+      res.status(401).json({
+        error: {
+          code: ApiErrorCode.UNAUTHORIZED,
+          message: 'Invalid or expired authentication token',
+          requestId,
+        },
+      });
+      return;
+    }
+  }
+
+  // 3. No credentials provided
+  next();
 }
 
 /**

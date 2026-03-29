@@ -1,9 +1,5 @@
-import type { Request, Response, NextFunction } from 'express';
-import { DecimalSerializationError, DecimalErrorCode } from '../serialization/decimal.js';
-import { SerializationLogger, error as logError } from '../utils/logger.js';
-
 export interface ApiErrorResponse {
-  error: { code: string; message: string; details?: unknown; requestId?: string };
+  error: { code: string; message: string; details?: unknown; requestId?: string | undefined };
 }
 
 export enum ApiErrorCode {

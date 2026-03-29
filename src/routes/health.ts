@@ -42,7 +42,9 @@ healthRouter.get('/', (req: Request, res: Response) => {
 });
 
 /**
- * GET /health/ready - Readiness probe
+ * Health check route for the Fluxora API.
+ * 
+ * Returns a 200 OK with common health metrics and dependencies.
  */
 healthRouter.get('/ready', async (req: Request, res: Response) => {
   const healthManager = req.app.locals.healthManager as HealthCheckManager;
