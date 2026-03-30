@@ -424,6 +424,166 @@ Likely future additions:
 - `HORIZON_URL`
 - `JWT_SECRET`
 
+## WebSocket API — Stream Updates (#49)
+
+The backend exposes a WebSocket endpoint for real-time stream update notifications.
+Clients subscribe to individual streams and receive push events as the indexer
+processes on-chain activity.
+
+### Endpoint
+
+```
+ws://<host>/ws/streams
+```
+
+### Protocol
+
+All messages are JSON text frames. Binary frames are rejected.
+
+#### Client → Server
+
+| Message | Description |
+|---|---|
+| `{ "type": "subscribe",   "streamId": "<id>" }` | Subscribe to updates for a stream |
+| `{ "type": "unsubscribe", "streamId": "<id>" }` | Stop receiving updates for a stream |
+
+#### Server → Client
+
+| Message | Description |
+|---|---|
+| `{ "type": "stream_update", "streamId": "<id>", "eventId": "<id>", "payload": {...} }` | Stream state change event |
+| `{ "type": "error", "code": "<CODE>", "message": "<text>" }` | Protocol or policy error |
+
+### Error codes
+
+| Code | Cause |
+|---|---|
+| `PAYLOAD_TOO_LARGE` | Inbound message exceeds 4 096 bytes |
+| `RATE_LIMIT_EXCEEDED` | More than 30 messages in a 10-second window |
+| `BINARY_NOT_SUPPORTED` | Binary frame received |
+| `INVALID_JSON` | Message is not valid JSON |
+| `INVALID_MESSAGE` | Missing or invalid `streamId` field |
+| `UNKNOWN_TYPE` | Unrecognised `type` field |
+
+### Operational notes
+
+- **Rate limiting**: 30 inbound messages per 10-second window per connection.
+  Excess messages receive a `RATE_LIMIT_EXCEEDED` error; the connection stays open.
+- **Duplicate delivery prevention**: Each event is identified by `(streamId, eventId)`.
+  If the indexer or RPC layer replays an event, the hub delivers it exactly once.
+  The dedup cache holds up to 10 000 entries (LRU eviction).
+- **Oversized payload rejection**: Inbound messages larger than 4 096 bytes are
+  rejected with `PAYLOAD_TOO_LARGE`. The connection stays open.
+- **RPC failure isolation**: The WS hub operates independently of the Stellar RPC
+  circuit breaker. Clients remain connected during RPC outages; events resume
+  automatically when the indexer recovers.
+- **Graceful shutdown**: `StreamHub.close()` is called during server shutdown to
+  drain connections cleanly.
+
+### Example (browser)
+
+```js
+const ws = new WebSocket('ws://localhost:3000/ws/streams');
+
+ws.onopen = () => {
+  ws.send(JSON.stringify({ type: 'subscribe', streamId: 'stream-abc123' }));
+};
+
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  if (msg.type === 'stream_update') {
+    console.log('Update for', msg.streamId, msg.payload);
+  }
+};
+```
+
+### Implementation
+
+| File | Description |
+|---|---|
+| `src/ws/hub.ts` | `StreamHub` class: connection tracking, rate limiting, dedup, broadcast |
+| `tests/ws.test.ts` | Integration tests: lifecycle, dedup, rate limiting, RPC failure modes |
+
+## WebSocket API — Stream Updates (#49)
+
+The backend exposes a WebSocket endpoint for real-time stream update notifications.
+Clients subscribe to individual streams and receive push events as the indexer
+processes on-chain activity.
+
+### Endpoint
+
+```
+ws://<host>/ws/streams
+```
+
+### Protocol
+
+All messages are JSON text frames. Binary frames are rejected.
+
+#### Client → Server
+
+| Message | Description |
+|---|---|
+| `{ "type": "subscribe",   "streamId": "<id>" }` | Subscribe to updates for a stream |
+| `{ "type": "unsubscribe", "streamId": "<id>" }` | Stop receiving updates for a stream |
+
+#### Server → Client
+
+| Message | Description |
+|---|---|
+| `{ "type": "stream_update", "streamId": "<id>", "eventId": "<id>", "payload": {...} }` | Stream state change event |
+| `{ "type": "error", "code": "<CODE>", "message": "<text>" }` | Protocol or policy error |
+
+### Error codes
+
+| Code | Cause |
+|---|---|
+| `PAYLOAD_TOO_LARGE` | Inbound message exceeds 4 096 bytes |
+| `RATE_LIMIT_EXCEEDED` | More than 30 messages in a 10-second window |
+| `BINARY_NOT_SUPPORTED` | Binary frame received |
+| `INVALID_JSON` | Message is not valid JSON |
+| `INVALID_MESSAGE` | Missing or invalid `streamId` field |
+| `UNKNOWN_TYPE` | Unrecognised `type` field |
+
+### Operational notes
+
+- **Rate limiting**: 30 inbound messages per 10-second window per connection.
+  Excess messages receive a `RATE_LIMIT_EXCEEDED` error; the connection stays open.
+- **Duplicate delivery prevention**: Each event is identified by `(streamId, eventId)`.
+  If the indexer or RPC layer replays an event, the hub delivers it exactly once.
+  The dedup cache holds up to 10 000 entries (LRU eviction).
+- **Oversized payload rejection**: Inbound messages larger than 4 096 bytes are
+  rejected with `PAYLOAD_TOO_LARGE`. The connection stays open.
+- **RPC failure isolation**: The WS hub operates independently of the Stellar RPC
+  circuit breaker. Clients remain connected during RPC outages; events resume
+  automatically when the indexer recovers.
+- **Graceful shutdown**: `StreamHub.close()` is called during server shutdown to
+  drain connections cleanly.
+
+### Example (browser)
+
+```js
+const ws = new WebSocket('ws://localhost:3000/ws/streams');
+
+ws.onopen = () => {
+  ws.send(JSON.stringify({ type: 'subscribe', streamId: 'stream-abc123' }));
+};
+
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  if (msg.type === 'stream_update') {
+    console.log('Update for', msg.streamId, msg.payload);
+  }
+};
+```
+
+### Implementation
+
+| File | Description |
+|---|---|
+| `src/ws/hub.ts` | `StreamHub` class: connection tracking, rate limiting, dedup, broadcast |
+| `tests/ws.test.ts` | Integration tests: lifecycle, dedup, rate limiting, RPC failure modes |
+
 ## Related repos
 
 - `fluxora-frontend` - dashboard and recipient UI
