@@ -39,6 +39,12 @@ export interface Config {
     logLevel: 'debug' | 'info' | 'warn' | 'error';
     metricsEnabled: boolean;
 
+    // Distributed Tracing (OpenTelemetry optional)
+    tracingEnabled: boolean;
+    tracingSampleRate: number; // 0.0 to 1.0
+    tracingOtelEnabled: boolean; // OpenTelemetry integration
+    tracingLogEvents: boolean; // Log span events
+
     // Webhooks
     webhookUrl?: string | undefined;
     webhookSecret?: string | undefined;
@@ -241,6 +247,12 @@ export function loadConfig(): Config {
 
         logLevel: (process.env.LOG_LEVEL ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
         metricsEnabled: parseBoolEnv(process.env.METRICS_ENABLED, true),
+
+        // Distributed Tracing (optional, disabled by default for zero overhead)
+        tracingEnabled: parseBoolEnv(process.env.TRACING_ENABLED, false),
+        tracingSampleRate: Math.min(1.0, Math.max(0.0, parseFloat(process.env.TRACING_SAMPLE_RATE ?? '1.0'))),
+        tracingOtelEnabled: parseBoolEnv(process.env.TRACING_OTEL_ENABLED, false),
+        tracingLogEvents: parseBoolEnv(process.env.TRACING_LOG_EVENTS, false),
 
         webhookUrl: process.env.WEBHOOK_URL,
         webhookSecret: process.env.WEBHOOK_SECRET,

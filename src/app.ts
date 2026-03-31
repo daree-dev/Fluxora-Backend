@@ -27,6 +27,26 @@ export function createApp(): express.Express {
   app.use(correlationIdMiddleware);
   app.use(corsAllowlistMiddleware);
   app.use(privacyHeaders);
+
+  // Correlation ID middleware (required for tracing)
+  app.use(correlationIdMiddleware);
+
+  // Distributed tracing middleware (optional, enabled via env config)
+  // The tracer is initialized globally in index.ts based on environment variables
+  // This is safe to call even if config hasn't been initialized (will just use defaults)
+  try {
+    const config = getConfig();
+    if (config && config.tracingEnabled) {
+      app.use(tracingMiddleware({
+        enabled: true,
+        sampleRate: config.tracingSampleRate ?? 1.0,
+      }));
+    }
+  } catch (err) {
+    // Configuration not initialized (may be in tests), skip tracing middleware
+    // This is safe and the app will continue to function normally
+  }
+
   app.use(requestLogger);
   app.use(requestLoggerMiddleware);
 
