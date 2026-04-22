@@ -1,79 +1,36 @@
-/**
- * Environment configuration module for Fluxora Backend
- * 
- * Responsibilities:
- * - Load and validate environment variables at startup
- * - Provide typed, immutable configuration object
- * - Fail fast on invalid configuration
- * - Support multiple environments (dev, staging, production)
- * 
- * Trust boundaries:
- * - Public: PORT, API_VERSION
- * - Authenticated: DATABASE_URL, REDIS_URL
- * - Admin-only: JWT_SECRET, HORIZON_SECRET_KEY
- * 
- * Multi-network contract addresses:
- * - STELLAR_NETWORK selects testnet or mainnet
- * - CONTRACT_ADDRESS_STREAMING overrides the default per-network address
- * - Defaults are well-known Fluxora contract addresses per network
- */
+import { StellarNetwork, STELLAR_NETWORKS, ContractAddresses } from './stellar.js';
 
 /**
- * Known Stellar network identifiers and their default passphrases + contract addresses.
- * Operators may override contract addresses via CONTRACT_ADDRESS_* env vars.
+ * Global configuration interface for the Fluxora API.
  */
-export const STELLAR_NETWORKS = {
-    testnet: {
-        passphrase: 'Test SDF Network ; September 2015',
-        horizonUrl: 'https://horizon-testnet.stellar.org',
-        // Placeholder — replace with deployed testnet contract ID
-        streamingContractAddress: 'TESTNET_STREAMING_CONTRACT_PLACEHOLDER',
-    },
-    mainnet: {
-        passphrase: 'Public Global Stellar Network ; September 2015',
-        horizonUrl: 'https://horizon.stellar.org',
-        // Placeholder — replace with deployed mainnet contract ID
-        streamingContractAddress: 'MAINNET_STREAMING_CONTRACT_PLACEHOLDER',
-    },
-} as const;
-
-export type StellarNetwork = keyof typeof STELLAR_NETWORKS;
-
-/**
- * Contract addresses resolved for the active network.
- * All fields are required — missing addresses cause a startup ConfigError.
- */
-export interface ContractAddresses {
-    /** Soroban contract ID for the streaming contract */
-    streaming: string;
-}
-
 export interface Config {
-    // Server
+    // Basic service info
     port: number;
-    nodeEnv: 'development' | 'staging' | 'production';
+    nodeEnv: 'development' | 'staging' | 'production' | 'test';
     apiVersion: string;
 
-    // Database
+    // Infrastructure
     databaseUrl: string;
-    databasePoolSize: number;
+    databasePoolMin: number;
+    databasePoolMax: number;
     databaseConnectionTimeout: number;
+    databaseIdleTimeout: number;
 
-    // Cache
     redisUrl: string;
     redisEnabled: boolean;
 
-    // Stellar — network-aware
+    // Stellar Network
     stellarNetwork: StellarNetwork;
     horizonUrl: string;
     horizonNetworkPassphrase: string;
     contractAddresses: ContractAddresses;
 
-    // Security
+    // Security & Auth
     jwtSecret: string;
     jwtExpiresIn: string;
+    apiKeys: string[];
 
-    // Request protection
+    // Request handling
     maxRequestSizeBytes: number;
     maxJsonDepth: number;
     requestTimeoutMs: number;
@@ -81,6 +38,10 @@ export interface Config {
     // Observability
     logLevel: 'debug' | 'info' | 'warn' | 'error';
     metricsEnabled: boolean;
+
+    // Webhooks
+    webhookUrl?: string | undefined;
+    webhookSecret?: string | undefined;
 
     // Feature flags
     enableStreamValidation: boolean;
@@ -134,7 +95,7 @@ function parseBytesEnv(value: string | undefined, defaultBytes: number): number 
         throw new ConfigError(`Invalid byte size format: ${value}. Use format like "10mb", "512kb", or "1024"`);
     }
 
-    const num = parseFloat(match[1]);
+    const num = parseFloat(match[1] ?? '0');
     const unit = (match[2] ?? 'b').toLowerCase();
 
     const multipliers: Record<string, number> = {
@@ -222,7 +183,7 @@ function resolveContractAddresses(network: StellarNetwork, isProduction: boolean
  * Throws ConfigError if validation fails
  */
 export function loadConfig(): Config {
-    const nodeEnv = (process.env.NODE_ENV ?? 'development') as 'development' | 'staging' | 'production';
+    const nodeEnv = (process.env.NODE_ENV ?? 'development') as 'development' | 'staging' | 'production' | 'test';
 
     // In production, enforce required secrets
     const isProduction = nodeEnv === 'production';
@@ -262,8 +223,10 @@ export function loadConfig(): Config {
         apiVersion: '0.1.0',
 
         databaseUrl,
-        databasePoolSize: parseIntEnv(process.env.DATABASE_POOL_SIZE, 10, 1, 100),
-        databaseConnectionTimeout: parseIntEnv(process.env.DATABASE_CONNECTION_TIMEOUT, 5000, 1000, 60000),
+        databasePoolMin: parseIntEnv(process.env.DB_POOL_MIN, 2, 1, 100),
+        databasePoolMax: parseIntEnv(process.env.DB_POOL_MAX, 10, 1, 100),
+        databaseConnectionTimeout: parseIntEnv(process.env.DB_CONNECTION_TIMEOUT, 5000, 1000, 60000),
+        databaseIdleTimeout: parseIntEnv(process.env.DB_IDLE_TIMEOUT, 30000, 1000, 600000),
 
         redisUrl: validateUrl(redisUrl, 'REDIS_URL'),
         redisEnabled: parseBoolEnv(process.env.REDIS_ENABLED, true),
@@ -275,6 +238,7 @@ export function loadConfig(): Config {
 
         jwtSecret,
         jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '24h',
+        apiKeys: (process.env.API_KEYS ?? (nodeEnv === 'test' ? 'test-api-key' : '')).split(',').map(k => k.trim()).filter(k => k.length > 0),
 
         maxRequestSizeBytes: parseBytesEnv(process.env.MAX_REQUEST_SIZE, 1024 * 1024), // 1MB default
         maxJsonDepth: parseIntEnv(process.env.MAX_JSON_DEPTH, 20, 1, 1000),
@@ -282,6 +246,9 @@ export function loadConfig(): Config {
 
         logLevel: (process.env.LOG_LEVEL ?? 'info') as 'debug' | 'info' | 'warn' | 'error',
         metricsEnabled: parseBoolEnv(process.env.METRICS_ENABLED, true),
+
+        webhookUrl: process.env.WEBHOOK_URL,
+        webhookSecret: process.env.WEBHOOK_SECRET,
 
         enableStreamValidation: parseBoolEnv(process.env.ENABLE_STREAM_VALIDATION, true),
         enableRateLimit: parseBoolEnv(process.env.ENABLE_RATE_LIMIT, !isProduction),

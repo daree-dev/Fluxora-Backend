@@ -2,12 +2,11 @@
  * Rate limiter middleware tests.
  *
  * Uses InMemoryCacheClient so no Redis instance is required.
- * Covers: normal flow, limit enforcement, header correctness,
- * fail-open on cache error, and IP extraction.
  */
 
 import express, { Application } from 'express';
 import request from 'supertest';
+import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { createRateLimiter } from '../src/middleware/rateLimit.js';
 import { InMemoryCacheClient, setCacheClient, resetCacheClient } from '../src/cache/redis.js';
 
@@ -18,7 +17,7 @@ function buildApp(max: number, windowSeconds = 60): Application {
   return app;
 }
 
-describe('Rate limiter middleware', () => {
+describe('createRateLimiter', () => {
   let cache: InMemoryCacheClient;
 
   beforeEach(() => {
@@ -50,7 +49,7 @@ describe('Rate limiter middleware', () => {
     await request(app).get('/ping').expect(200);
     await request(app).get('/ping').expect(200);
     const res = await request(app).get('/ping').expect(429);
-    expect(res.body.error.code).toBe('rate_limit_exceeded');
+    expect(res.body.error.code).toBe('RATE_LIMIT_EXCEEDED');
     expect(res.body.error.status).toBe(429);
   });
 
@@ -71,18 +70,14 @@ describe('Rate limiter middleware', () => {
   it('fails open when cache is unavailable', async () => {
     resetCacheClient(); // NullCacheClient — always returns null
     const app = buildApp(1);
-    // Should allow even though limit is 1 (cache unavailable = fail-open)
     await request(app).get('/ping').expect(200);
     await request(app).get('/ping').expect(200);
   });
 
   it('respects X-Forwarded-For for IP extraction', async () => {
     const app = buildApp(1);
-    // First request from "client-a"
     await request(app).get('/ping').set('X-Forwarded-For', '1.2.3.4').expect(200);
-    // Second request from same IP — should be blocked
     await request(app).get('/ping').set('X-Forwarded-For', '1.2.3.4').expect(429);
-    // Different IP — should be allowed
     await request(app).get('/ping').set('X-Forwarded-For', '5.6.7.8').expect(200);
   });
 });

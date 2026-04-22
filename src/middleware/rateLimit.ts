@@ -92,7 +92,7 @@ export function createRateLimiter(options: Partial<RateLimitOptions> = {}) {
 
         res.status(429).json({
           error: {
-            code: 'rate_limit_exceeded',
+            code: 'RATE_LIMIT_EXCEEDED',
             message: `Too many requests. Limit is ${opts.max} per ${opts.windowSeconds}s window.`,
             status: 429,
             retryAfter,

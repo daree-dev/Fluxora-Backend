@@ -1,113 +1,84 @@
-import express from 'express';
-import type { Request, Response } from 'express';
-import { assessIndexerHealth } from '../indexer/stall.js';
-import { getCacheClient } from '../cache/redis.js';
-
+import { Router, Request, Response } from 'express';
+import { getIndexerHealth } from './indexer.js';
 import { HealthCheckManager } from '../config/health.js';
-import { Logger } from '../config/logger.js';
 import { Config } from '../config/env.js';
-import { successResponse, errorResponse } from '../utils/response.js';
-
-import {
-  DEFAULT_INDEXER_STALL_THRESHOLD_MS,
-  assessIndexerHealth,
-} from '../indexer/stall.js';
+import { isShuttingDown } from '../shutdown.js';
 
 export const healthRouter = Router();
 
-    enabled: false,
-    stallThresholdMs: DEFAULT_INDEXER_STALL_THRESHOLD_MS,
-  });
-
-  res.json({
-    status: indexer.status === 'stalled' || indexer.status === 'starting'
 /**
- * GET /health - Liveness + basic system status
+ * GET /health
+ * Liveness check — returns 503 during graceful shutdown.
  */
 healthRouter.get('/', (req: Request, res: Response) => {
   const config = req.app.locals.config as Config | undefined;
 
-  // Assess indexer health (safe fallback if not present)
-  let indexer;
-  try {
-    indexer = assessIndexerHealth({
-      thresholdMs: DEFAULT_INDEXER_STALL_THRESHOLD_MS,
+  if (isShuttingDown()) {
+    res.status(503).json({
+      status: 'shutting_down',
+      service: 'fluxora-backend',
+      timestamp: new Date().toISOString(),
     });
-  } catch {
-    indexer = { status: 'unknown' };
+    return;
   }
 
+  const indexer = getIndexerHealth();
   const status =
-    indexer.status === 'stalled' || indexer.status === 'starting'
+    indexer.dependency === 'unavailable' || indexer.dependency === 'degraded'
       ? 'degraded'
       : 'ok';
 
-  res.json(
-    successResponse({
-      status,
-      service: 'fluxora-backend',
-      network: config?.stellarNetwork ?? 'unknown',
-      contractAddresses: config?.contractAddresses ?? {},
-      timestamp: new Date().toISOString(),
-      indexer,
-    })
-  );
+  res.json({
+    status,
+    service: 'fluxora-backend',
+    network: config?.stellarNetwork ?? 'unknown',
+    timestamp: new Date().toISOString(),
+    dependencies: { indexer },
+  });
 });
 
 /**
- * GET /health/ready - Readiness probe
+ * GET /health/ready
+ * Readiness check — runs all registered health checkers.
  */
 healthRouter.get('/ready', async (req: Request, res: Response) => {
-  const healthManager = req.app.locals.healthManager as HealthCheckManager;
-  const logger = req.app.locals.logger as Logger;
+  const healthManager = req.app.locals.healthManager as HealthCheckManager | undefined;
+
+  if (!healthManager) {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    return;
+  }
 
   try {
     const report = await healthManager.checkAll();
 
     if (report.status === 'unhealthy') {
-      logger.warn('Readiness check failed', {
-        dependencies: report.dependencies.map((d: any) => ({
-          name: d.name,
-          status: d.status,
-          error: d.error,
-        })),
-      });
-
-      return res.status(503).json(
-        errorResponse(
-          'Service not ready',
-          'SERVICE_UNAVAILABLE',
-          report
-        )
-      );
+      res.status(503).json({ status: 'not_ready', report });
+      return;
     }
 
-    res.json(successResponse({ report }));
+    res.json({ status: 'ready', report });
   } catch (err) {
-    logger.error('Readiness check error', err as Error);
-
-    res.status(503).json(
-      errorResponse('Health check failed', 'HEALTH_CHECK_ERROR')
-    );
+    res.status(503).json({
+      status: 'error',
+      error: err instanceof Error ? err.message : 'Health check failed',
+    });
   }
 });
 
 /**
- * GET /health/live - Detailed health report
+ * GET /health/live
+ * Returns the last cached health report without re-running checks.
  */
-healthRouter.get('/live', async (req: Request, res: Response) => {
-  const healthManager = req.app.locals.healthManager as HealthCheckManager;
-  const config = req.app.locals.config as Config;
-  const logger = req.app.locals.logger as Logger;
+healthRouter.get('/live', (req: Request, res: Response) => {
+  const healthManager = req.app.locals.healthManager as HealthCheckManager | undefined;
+  const config = req.app.locals.config as Config | undefined;
 
-  try {
-    const report = healthManager.getLastReport(config.apiVersion);
-    res.json(successResponse({ report }));
-  } catch (err) {
-    logger.error('Failed to get health report', err as Error);
-
-    res.status(500).json(
-      errorResponse('Failed to get health report', 'HEALTH_CHECK_ERROR')
-    );
+  if (!healthManager) {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    return;
   }
+
+  const report = healthManager.getLastReport(config?.apiVersion ?? '0.1.0');
+  res.json({ status: report.status, report });
 });
