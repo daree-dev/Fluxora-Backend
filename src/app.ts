@@ -5,6 +5,7 @@ import { healthRouter } from './routes/health.js';
 import { indexerRouter } from './routes/indexer.js';
 import { auditRouter } from './routes/audit.js';
 import { dlqRouter } from './routes/dlq.js';
+import { adminRouter } from './routes/admin.js';
 import { correlationIdMiddleware } from './middleware/correlationId.js';
 import { corsAllowlistMiddleware } from './middleware/cors.js';
 import { requestLoggerMiddleware } from './middleware/requestLogger.js';
@@ -45,6 +46,7 @@ export function createApp(options: AppOptions = {}): Express {
   app.use('/internal/indexer', indexerRouter);
   app.use('/api/audit', auditRouter);
   app.use('/admin/dlq', dlqRouter);
+  app.use('/api/admin', adminRouter);
 
   app.get('/', (_req: Request, res: Response) => {
     res.json({
