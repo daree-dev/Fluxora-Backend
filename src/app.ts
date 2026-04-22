@@ -11,20 +11,29 @@ import { corsAllowlistMiddleware } from './middleware/cors.js';
 import { requestLoggerMiddleware } from './middleware/requestLogger.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { isShuttingDown } from './shutdown.js';
+import { createRateLimiter } from './middleware/rateLimiter.js';
+import { createRateLimitsRouter } from './routes/rateLimits.js';
+import { getRateLimitConfig } from './config/rateLimits.js';
 
 export interface AppOptions {
   /** When true, mounts a /__test/error route that throws unconditionally. */
   includeTestRoutes?: boolean;
+  /** Environment variables used to seed the rate-limiter (defaults to process.env). */
+  env?: Record<string, string | undefined>;
 }
 
 export function createApp(options: AppOptions = {}): Express {
   const app = express();
+  const env = options.env ?? (process.env as Record<string, string | undefined>);
+  const rateLimiter = createRateLimiter(env);
+  const { ip, apiKey, admin } = getRateLimitConfig(env);
 
   app.use(express.json({ limit: '256kb' }));
   // Correlation ID must be first so all subsequent middleware/routes have req.correlationId.
   app.use(correlationIdMiddleware);
   app.use(corsAllowlistMiddleware);
   app.use(requestLoggerMiddleware);
+  app.use(rateLimiter);
 
   // During shutdown, tell clients to close the connection so keep-alive
   // connections are not reused and the server can drain quickly.
@@ -43,6 +52,7 @@ export function createApp(options: AppOptions = {}): Express {
 
   app.use('/health', healthRouter);
   app.use('/api/streams', streamsRouter);
+  app.use('/api/rate-limits', createRateLimitsRouter(rateLimiter, { defaults: { ip, apiKey, admin } }));
   app.use('/internal/indexer', indexerRouter);
   app.use('/api/audit', auditRouter);
   app.use('/admin/dlq', dlqRouter);
