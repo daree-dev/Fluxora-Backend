@@ -182,3 +182,166 @@ describe('gracefulShutdown()', () => {
     expect(forceCloseSpy).toHaveBeenCalled();
   });
 });
+
+// --- WebSocket Hub Shutdown Tests ---
+
+describe('WebSocket Hub Shutdown', () => {
+  beforeEach(() => {
+    // Reset WebSocket hub singleton
+    const { resetStreamHub } = require('../src/ws/hub.js');
+    resetStreamHub();
+  });
+
+  it('closes WebSocket hub during shutdown', async () => {
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+
+    const { createStreamHub, getStreamHub } = require('../src/ws/hub.js');
+    const hub = createStreamHub(server);
+    
+    const closeSpy = jest.spyOn(hub, 'close');
+    
+    // Add shutdown hook for WebSocket hub
+    addShutdownHook(async () => {
+      const currentHub = getStreamHub();
+      if (currentHub) {
+        await new Promise<void>((resolve) => {
+          currentHub.close(() => resolve());
+        });
+      }
+    });
+
+    await gracefulShutdown(server, 'SIGTERM', 5_000);
+    
+    expect(closeSpy).toHaveBeenCalled();
+  });
+
+  it('handles WebSocket hub close errors gracefully', async () => {
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+
+    const { createStreamHub, getStreamHub } = require('../src/ws/hub.js');
+    const hub = createStreamHub(server);
+    
+    // Mock close to throw an error
+    const closeSpy = jest.spyOn(hub, 'close').mockImplementation((cb?: () => void) => {
+      if (cb) cb();
+      throw new Error('WebSocket close error');
+    });
+    
+    // Add shutdown hook for WebSocket hub
+    addShutdownHook(async () => {
+      const currentHub = getStreamHub();
+      if (currentHub) {
+        await new Promise<void>((resolve) => {
+          currentHub.close(() => resolve());
+        });
+      }
+    });
+
+    // Should not throw despite WebSocket close error
+    await expect(gracefulShutdown(server, 'SIGTERM', 5_000)).resolves.toBeUndefined();
+    expect(closeSpy).toHaveBeenCalled();
+  });
+});
+
+// --- Database Pool Shutdown Tests ---
+
+describe('Database Pool Shutdown', () => {
+  it('closes database pool during shutdown', async () => {
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+
+    // Mock database pool
+    const mockPool = {
+      end: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const { setPool } = require('../src/db/pool.js');
+    setPool(mockPool);
+
+    // Add shutdown hook for database pool
+    addShutdownHook(async () => {
+      const { getPool } = require('../src/db/pool.js');
+      const pool = getPool();
+      await pool.end();
+    });
+
+    await gracefulShutdown(server, 'SIGTERM', 5_000);
+    
+    expect(mockPool.end).toHaveBeenCalledTimes(1);
+  });
+
+  it('handles database pool close errors gracefully', async () => {
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+
+    // Mock database pool that throws on close
+    const mockPool = {
+      end: jest.fn().mockRejectedValue(new Error('Database close error')),
+    };
+
+    const { setPool } = require('../src/db/pool.js');
+    setPool(mockPool);
+
+    // Add shutdown hook for database pool
+    addShutdownHook(async () => {
+      const { getPool } = require('../src/db/pool.js');
+      const pool = getPool();
+      await pool.end();
+    });
+
+    // Should not throw despite database close error
+    await expect(gracefulShutdown(server, 'SIGTERM', 5_000)).resolves.toBeUndefined();
+    expect(mockPool.end).toHaveBeenCalledTimes(1);
+  });
+});
+
+// --- Integration Tests ---
+
+describe('Graceful Shutdown Integration', () => {
+  it('executes all shutdown hooks in correct order', async () => {
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+
+    const executionOrder: string[] = [];
+
+    // Add multiple shutdown hooks
+    addShutdownHook(async () => {
+      executionOrder.push('hook1');
+    });
+
+    addShutdownHook(async () => {
+      executionOrder.push('hook2');
+    });
+
+    addShutdownHook(async () => {
+      executionOrder.push('hook3');
+    });
+
+    await gracefulShutdown(server, 'SIGTERM', 5_000);
+    
+    expect(executionOrder).toEqual(['hook1', 'hook2', 'hook3']);
+  });
+
+  it('handles mixed synchronous and asynchronous hooks', async () => {
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+
+    const results: string[] = [];
+
+    // Add both sync and async hooks
+    addShutdownHook(() => {
+      results.push('sync');
+    });
+
+    addShutdownHook(async () => {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      results.push('async');
+    });
+
+    await gracefulShutdown(server, 'SIGTERM', 5_000);
+    
+    expect(results).toEqual(['sync', 'async']);
+  });
+});
