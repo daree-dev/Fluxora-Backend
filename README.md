@@ -266,9 +266,32 @@ npm install -g wscat
 wscat -c ws://localhost:3000/ws/streams
 ```
 
+### Authentication (optional, backward-compatible)
+
+JWT authentication on the WebSocket upgrade is supported via two environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WS_AUTH_REQUIRED` | `false` | Set to `true` to reject unauthenticated upgrade requests with HTTP 401 |
+| `JWT_SECRET` | — | HS256 secret used to verify tokens |
+
+Token delivery (first match wins):
+1. `Authorization: Bearer <token>` header on the upgrade request
+2. `?token=<jwt>` query-string parameter
+
+When `WS_AUTH_REQUIRED` is absent or `false`, all connections are accepted regardless of whether a token is present. This enables a zero-downtime rollout: deploy first, issue tokens to clients, then flip the flag.
+
+```bash
+# Connect with a token
+wscat -c "ws://localhost:3000/ws/streams" \
+  --header "Authorization: Bearer <your-jwt>"
+
+# Or via query string
+wscat -c "ws://localhost:3000/ws/streams?token=<your-jwt>"
+```
+
 ### Non-goals and follow-up
 
-- **Authentication / authorization** on the WebSocket endpoint is intentionally deferred. Follow-up: add JWT or API-key validation on upgrade.
 - **Message replay / durable event log** — events are fire-and-forget; clients that disconnect miss events. Follow-up: add a replay store.
 - **Per-stream subscription filtering** — all clients receive all events. Follow-up: add a subscription message protocol.
 
