@@ -7,22 +7,26 @@ import { auditRouter } from './routes/audit.js';
 import { adminRouter } from './routes/admin.js';
 import { dlqRouter } from './routes/dlq.js';
 import { authRouter } from './routes/auth.js';
-import { adminRouter } from './routes/admin.js';
 import { correlationIdMiddleware } from './middleware/correlationId.js';
 import { corsAllowlistMiddleware } from './middleware/cors.js';
 import { requestLoggerMiddleware } from './middleware/requestLogger.js';
 import { errorHandler } from './middleware/errorHandler.js';
-import { bodySizeLimitMiddleware, BODY_LIMIT_BYTES } from './middleware/requestProtection.js';
+import { bodySizeLimitMiddleware, requestTimeoutMiddleware, BODY_LIMIT_BYTES } from './middleware/requestProtection.js';
+import { httpMetrics } from './middleware/httpMetrics.js';
 import { isShuttingDown } from './shutdown.js';
 import { createRateLimiter } from './middleware/rateLimiter.js';
 import { createRateLimitsRouter } from './routes/rateLimits.js';
 import { getRateLimitConfig } from './config/rateLimits.js';
+import { registry } from './metrics.js';
+import { successResponse, errorResponse } from './utils/response.js';
 
 export interface AppOptions {
   /** When true, mounts a /__test/error and /__test/timeout route. */
   includeTestRoutes?: boolean;
   /** Environment variables used to seed the rate-limiter (defaults to process.env). */
   env?: Record<string, string | undefined>;
+  /** Socket-level request timeout in ms (defaults to 30000). */
+  requestTimeoutMs?: number;
 }
 
 export function createApp(options: AppOptions = {}): Express {
@@ -30,6 +34,7 @@ export function createApp(options: AppOptions = {}): Express {
   const env = options.env ?? (process.env as Record<string, string | undefined>);
   const rateLimiter = createRateLimiter(env);
   const { ip, apiKey, admin } = getRateLimitConfig(env);
+  const timeoutMs = options.requestTimeoutMs ?? 30000;
 
   app.use(bodySizeLimitMiddleware);
   app.use(express.json({ limit: BODY_LIMIT_BYTES }));
@@ -37,10 +42,11 @@ export function createApp(options: AppOptions = {}): Express {
   app.use(correlationIdMiddleware);
   app.use(corsAllowlistMiddleware);
   app.use(requestLoggerMiddleware);
+  app.use(httpMetrics);
   app.use(rateLimiter);
 
   // Attach AbortSignal and enforce timeout limits before hitting complex routes
-  app.use(createRequestTimeoutMiddleware(timeoutMs));
+  app.use(requestTimeoutMiddleware(timeoutMs));
 
   app.use((_req: Request, res: Response, next: NextFunction) => {
     if (isShuttingDown()) {
@@ -61,7 +67,7 @@ export function createApp(options: AppOptions = {}): Express {
           const timer = setTimeout(() => resolve(), 5000);
 
           // Listen to the abort signal to halt operation
-          req.abortSignal.addEventListener('abort', () => {
+          req.socket.once('timeout', () => {
             clearTimeout(timer);
             reject(new Error('Operation aborted by signal'));
           });
@@ -82,9 +88,13 @@ export function createApp(options: AppOptions = {}): Express {
   app.use('/api/admin', adminRouter);
   app.use('/internal/indexer', indexerRouter);
   app.use('/api/audit', auditRouter);
-  app.use('/api/admin', adminRouter);
   app.use('/admin/dlq', dlqRouter);
-  app.use('/api/admin', adminRouter);
+  app.use('/api/rate-limits', createRateLimitsRouter({ ip, apiKey, admin }));
+
+  app.get('/metrics', async (_req: Request, res: Response) => {
+    res.set('Content-Type', registry.contentType);
+    res.end(await registry.metrics());
+  });
 
   app.get('/', (_req: Request, res: Response) => {
     res.json(successResponse({
