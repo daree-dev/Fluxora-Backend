@@ -7,7 +7,6 @@ import { auditRouter } from './routes/audit.js';
 import { adminRouter } from './routes/admin.js';
 import { dlqRouter } from './routes/dlq.js';
 import { authRouter } from './routes/auth.js';
-import { adminRouter } from './routes/admin.js';
 import { correlationIdMiddleware } from './middleware/correlationId.js';
 import { corsAllowlistMiddleware } from './middleware/cors.js';
 import { requestLoggerMiddleware } from './middleware/requestLogger.js';
@@ -17,12 +16,18 @@ import { isShuttingDown } from './shutdown.js';
 import { createRateLimiter } from './middleware/rateLimiter.js';
 import { createRateLimitsRouter } from './routes/rateLimits.js';
 import { getRateLimitConfig } from './config/rateLimits.js';
+import type { Config } from './config/env.js';
+import { HealthCheckManager } from './config/health.js';
 
 export interface AppOptions {
   /** When true, mounts a /__test/error and /__test/timeout route. */
   includeTestRoutes?: boolean;
   /** Environment variables used to seed the rate-limiter (defaults to process.env). */
   env?: Record<string, string | undefined>;
+  /** Optional pre-built config to inject into app.locals (for testing). */
+  config?: Config;
+  /** Optional pre-built health manager to inject into app.locals (for testing). */
+  healthManager?: HealthCheckManager;
 }
 
 export function createApp(options: AppOptions = {}): Express {
@@ -30,6 +35,14 @@ export function createApp(options: AppOptions = {}): Express {
   const env = options.env ?? (process.env as Record<string, string | undefined>);
   const rateLimiter = createRateLimiter(env);
   const { ip, apiKey, admin } = getRateLimitConfig(env);
+
+  // Inject config and healthManager into app.locals for route handlers
+  if (options.config) {
+    app.locals.config = options.config;
+  }
+  if (options.healthManager) {
+    app.locals.healthManager = options.healthManager;
+  }
 
   app.use(bodySizeLimitMiddleware);
   app.use(express.json({ limit: BODY_LIMIT_BYTES }));
