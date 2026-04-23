@@ -7,16 +7,16 @@ import { auditRouter } from './routes/audit.js';
 import { adminRouter } from './routes/admin.js';
 import { dlqRouter } from './routes/dlq.js';
 import { authRouter } from './routes/auth.js';
-import { adminRouter } from './routes/admin.js';
 import { correlationIdMiddleware } from './middleware/correlationId.js';
 import { corsAllowlistMiddleware } from './middleware/cors.js';
 import { requestLoggerMiddleware } from './middleware/requestLogger.js';
 import { errorHandler } from './middleware/errorHandler.js';
-import { bodySizeLimitMiddleware, BODY_LIMIT_BYTES } from './middleware/requestProtection.js';
+import { bodySizeLimitMiddleware, BODY_LIMIT_BYTES, requestTimeoutMiddleware } from './middleware/requestProtection.js';
 import { isShuttingDown } from './shutdown.js';
 import { createRateLimiter } from './middleware/rateLimiter.js';
 import { createRateLimitsRouter } from './routes/rateLimits.js';
 import { getRateLimitConfig } from './config/rateLimits.js';
+import { successResponse, errorResponse } from './utils/response.js';
 
 export interface AppOptions {
   /** When true, mounts a /__test/error and /__test/timeout route. */
@@ -40,7 +40,7 @@ export function createApp(options: AppOptions = {}): Express {
   app.use(rateLimiter);
 
   // Attach AbortSignal and enforce timeout limits before hitting complex routes
-  app.use(createRequestTimeoutMiddleware(timeoutMs));
+  app.use(requestTimeoutMiddleware(30_000));
 
   app.use((_req: Request, res: Response, next: NextFunction) => {
     if (isShuttingDown()) {
@@ -54,19 +54,11 @@ export function createApp(options: AppOptions = {}): Express {
       throw new Error('Intentional test error');
     });
 
-    app.get('/__test/timeout', async (req: Request, res: Response, next: NextFunction) => {
+    app.get('/__test/timeout', async (_req: Request, res: Response, next: NextFunction) => {
       try {
-        await new Promise<void>((resolve, reject) => {
-          // Simulate a long running operation
-          const timer = setTimeout(() => resolve(), 5000);
-
-          // Listen to the abort signal to halt operation
-          req.abortSignal.addEventListener('abort', () => {
-            clearTimeout(timer);
-            reject(new Error('Operation aborted by signal'));
-          });
+        await new Promise<void>((resolve) => {
+          setTimeout(() => resolve(), 5000);
         });
-
         if (!res.headersSent) {
           res.json({ success: true });
         }
@@ -82,9 +74,7 @@ export function createApp(options: AppOptions = {}): Express {
   app.use('/api/admin', adminRouter);
   app.use('/internal/indexer', indexerRouter);
   app.use('/api/audit', auditRouter);
-  app.use('/api/admin', adminRouter);
   app.use('/admin/dlq', dlqRouter);
-  app.use('/api/admin', adminRouter);
 
   app.get('/', (_req: Request, res: Response) => {
     res.json(successResponse({

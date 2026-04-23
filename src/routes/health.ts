@@ -15,7 +15,7 @@ export const healthRouter = Router();
 healthRouter.get('/', (req: Request, res: Response) => {
   // Return 503 during graceful shutdown
   if (isShuttingDown()) {
-    return res.status(503).json(
+    res.status(503).json(
       successResponse({
         status: 'shutting_down',
         service: 'fluxora-backend',
@@ -25,12 +25,13 @@ healthRouter.get('/', (req: Request, res: Response) => {
         message: 'Service is shutting down',
       })
     );
+    return;
   }
 
   const config = req.app.locals.config as Config | undefined;
   let indexer;
   try {
-    indexer = assessIndexerHealth({ thresholdMs: DEFAULT_INDEXER_STALL_THRESHOLD_MS });
+    indexer = assessIndexerHealth({ stallThresholdMs: DEFAULT_INDEXER_STALL_THRESHOLD_MS });
   } catch {
     indexer = { status: 'unknown' };
   }
@@ -54,7 +55,8 @@ healthRouter.get('/', (req: Request, res: Response) => {
 healthRouter.get('/ready', async (req: Request, res: Response) => {
   // Return 503 during graceful shutdown
   if (isShuttingDown()) {
-    return res.status(503).json(errorResponse('Service is shutting down', 'SERVICE_SHUTTING_DOWN'));
+    res.status(503).json(errorResponse('Service is shutting down', 'SERVICE_SHUTTING_DOWN'));
+    return;
   }
 
   const healthManager = req.app.locals.healthManager as HealthCheckManager;
@@ -69,7 +71,7 @@ healthRouter.get('/ready', async (req: Request, res: Response) => {
           error: d.error,
         })),
       });
-      return res.status(503).json(errorResponse('Service not ready', 'SERVICE_UNAVAILABLE', report));
+      return void res.status(503).json(errorResponse('Service not ready', 'SERVICE_UNAVAILABLE', report));
     }
     res.json(successResponse({ report }));
   } catch (err) {

@@ -73,7 +73,7 @@ export class HealthCheckManager {
         name: checker.name,
         status: result.error ? 'unhealthy' : 'healthy',
         latency,
-        error: result.error,
+        ...(result.error !== undefined ? { error: result.error } : {}),
         lastChecked: new Date().toISOString(),
       };
 
