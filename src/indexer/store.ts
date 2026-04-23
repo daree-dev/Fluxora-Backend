@@ -1,10 +1,7 @@
 import { ContractEventRecord, IndexerStoreKind } from './types.js';
 import { StreamEventReplayFilter, StreamEventReplayResult, StreamEventRecord } from '../db/types.js';
 
-export type InsertContractEventsResult = {
-  insertedEventIds: string[];
-  duplicateEventIds: string[];
-};
+export type InsertContractEventsResult = { insertedEventIds: string[]; duplicateEventIds: string[]; };
 
 export interface ContractEventStore {
   readonly kind: IndexerStoreKind;
@@ -16,50 +13,47 @@ export interface ContractEventStore {
 }
 
 export interface PgClientLike {
-  query<T = unknown>(text: string, values?: unknown[]): Promise<{
-    rows: T[];
-    rowCount?: number | null;
-  }>;
+  query<T = unknown>(text: string, values?: unknown[]): Promise<{ rows: T[]; rowCount?: number | null }>;
 }
 
 export class InMemoryContractEventStore implements ContractEventStore {
   public readonly kind: IndexerStoreKind = 'memory';
-
   private readonly records = new Map<string, ContractEventRecord>();
+  private readonly reorgLog: ReorgRecord[] = [];
 
   async insertMany(events: ContractEventRecord[]): Promise<InsertContractEventsResult> {
     const insertedEventIds: string[] = [];
     const duplicateEventIds: string[] = [];
-
+    const staged = new Map<string, ContractEventRecord>();
     for (const event of events) {
-      if (this.records.has(event.eventId)) {
+      if (this.records.has(event.eventId) || staged.has(event.eventId)) {
         duplicateEventIds.push(event.eventId);
         continue;
       }
-
-      this.records.set(event.eventId, {
-        ...event,
-        ingestedAt: event.ingestedAt ?? new Date().toISOString(),
-      });
+      staged.set(event.eventId, { ...event, ingestedAt: new Date().toISOString() });
       insertedEventIds.push(event.eventId);
     }
 
     return { insertedEventIds, duplicateEventIds };
   }
 
-  async rollbackBeforeLedger(ledger: number): Promise<void> {
+  async rollbackBeforeLedger(forkLedger: number): Promise<void> {
+    const removedEventIds: string[] = [];
+    let evictedHash = '';
+    for (const record of this.records.values()) {
+      if (record.ledger === forkLedger) { evictedHash = record.ledgerHash; break; }
+    }
     for (const [eventId, record] of this.records) {
-      if (record.ledger >= ledger) {
-        this.records.delete(eventId);
-      }
+      if (record.ledger >= forkLedger) { removedEventIds.push(eventId); this.records.delete(eventId); }
+    }
+    if (removedEventIds.length > 0 || evictedHash !== '') {
+      this.reorgLog.push({ forkLedger, evictedHash, incomingHash: '', removedEventIds, rolledBackAt: new Date().toISOString() });
     }
   }
 
   async getLedgerHash(ledger: number): Promise<string | null> {
     for (const record of this.records.values()) {
-      if (record.ledger === ledger) {
-        return record.ledgerHash;
-      }
+      if (record.ledger === ledger) return record.ledgerHash;
     }
     return null;
   }
@@ -102,15 +96,29 @@ export class InMemoryContractEventStore implements ContractEventStore {
   all(): ContractEventRecord[] {
     return [...this.records.values()].sort((a, b) => a.eventId.localeCompare(b.eventId));
   }
+
+  byLedger(ledger: number): ContractEventRecord[] {
+    return [...this.records.values()].filter((r) => r.ledger === ledger).sort((a, b) => a.eventIndex - b.eventIndex);
+  }
+
+  getReorgLog(): Readonly<ReorgRecord[]> { return this.reorgLog; }
+
+  ledgerCount(): number {
+    return new Set([...this.records.values()].map((r) => r.ledger)).size;
+  }
+
+  tipLedger(): number | null {
+    let tip: number | null = null;
+    for (const record of this.records.values()) {
+      if (tip === null || record.ledger > tip) tip = record.ledger;
+    }
+    return tip;
+  }
 }
 
 export class PostgresContractEventStore implements ContractEventStore {
   public readonly kind: IndexerStoreKind = 'postgres';
-
-  constructor(
-    private readonly client: PgClientLike,
-    private readonly tableName = 'contract_events'
-  ) {}
+  constructor(private readonly client: PgClientLike, private readonly tableName = 'contract_events') {}
 
   async insertMany(events: ContractEventRecord[]): Promise<InsertContractEventsResult> {
     if (events.length === 0) {
@@ -148,7 +156,7 @@ export class PostgresContractEventStore implements ContractEventStore {
     `;
 
     const result = await this.client.query<{ event_id: string }>(sql, values);
-    const insertedEventIds = result.rows.map((row) => row.event_id);
+    const insertedEventIds = result.rows.map((r) => r.event_id);
     const inserted = new Set(insertedEventIds);
     const duplicateEventIds = events
       .map((e) => e.eventId)
