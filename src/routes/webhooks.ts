@@ -8,6 +8,7 @@ import { webhookService } from '../webhooks/service.js';
 import { webhookDeliveryStore, type DeadLetterQueueItem, type OutboxItem, type CircuitBreakerState } from '../webhooks/store.js';
 import { verifyWebhookSignature } from '../webhooks/signature.js';
 import { logger } from '../lib/logger.js';
+import { successResponse, errorResponse } from '../utils/response.js';
 
 export const webhooksRouter = express.Router();
 
@@ -76,19 +77,17 @@ webhooksRouter.post('/queue', express.json(), async (req, res) => {
  */
 webhooksRouter.get('/deliveries/:deliveryId', (req, res) => {
   const { deliveryId } = req.params;
+  const requestId = (req as any).id as string | undefined;
 
   const delivery = webhookService.getDeliveryStatus(deliveryId);
 
   if (!delivery) {
-    return res.status(404).json({
-      error: {
-        code: 'DELIVERY_NOT_FOUND',
-        message: `Webhook delivery ${deliveryId} not found`,
-      },
-    });
+    return res.status(404).json(
+      errorResponse('DELIVERY_NOT_FOUND', `Webhook delivery ${deliveryId} not found`, undefined, requestId)
+    );
   }
 
-  res.json({
+  res.json(successResponse({
     id: delivery.id,
     deliveryId: delivery.deliveryId,
     eventId: delivery.eventId,
@@ -103,7 +102,7 @@ webhooksRouter.get('/deliveries/:deliveryId', (req, res) => {
     })),
     createdAt: new Date(delivery.createdAt).toISOString(),
     updatedAt: new Date(delivery.updatedAt).toISOString(),
-  });
+  }, requestId));
 });
 
 /**
@@ -134,7 +133,7 @@ webhooksRouter.get('/deliveries', (req, res) => {
       createdAt: new Date(delivery.createdAt).toISOString(),
       updatedAt: new Date(delivery.updatedAt).toISOString(),
     })),
-  });
+  }, requestId));
 });
 
 /**
@@ -347,6 +346,7 @@ webhooksRouter.get('/metrics', (req, res) => {
  * Verify a webhook signature (for consumer testing)
  */
 webhooksRouter.post('/verify', express.raw({ type: 'application/json' }), (req, res) => {
+  const requestId = (req as any).id as string | undefined;
   const secret = req.query.secret as string;
   const deliveryId = req.header('x-fluxora-delivery-id');
   const timestamp = req.header('x-fluxora-timestamp');
@@ -362,18 +362,16 @@ webhooksRouter.post('/verify', express.raw({ type: 'application/json' }), (req, 
   });
 
   if (!result.ok) {
-    return res.status(result.status).json({
-      ok: false,
-      code: result.code,
-      message: result.message,
-    });
+    return res.status(result.status).json(
+      errorResponse(result.code, result.message, undefined, requestId)
+    );
   }
 
-  res.json({
+  res.json(successResponse({
     ok: true,
     code: result.code,
     message: result.message,
-  });
+  }, requestId));
 });
 
 /**
@@ -443,35 +441,30 @@ webhooksRouter.post('/process-outbox', express.json(), async (req, res) => {
  * Process pending webhook retries (internal endpoint for background job)
  */
 webhooksRouter.post('/retry', express.json(), async (req, res) => {
+  const requestId = (req as any).id as string | undefined;
   const secret = req.query.secret as string;
 
   if (!secret) {
     logger.warn('Webhook retry endpoint called without secret', undefined);
-    return res.status(400).json({
-      error: {
-        code: 'MISSING_SECRET',
-        message: 'Webhook secret is required as query parameter',
-      },
-    });
+    return res.status(400).json(
+      errorResponse('MISSING_SECRET', 'Webhook secret is required as query parameter', undefined, requestId)
+    );
   }
 
   try {
     await webhookService.processPendingRetries(secret);
-    res.json({
+    res.json(successResponse({
       ok: true,
       message: 'Pending webhook retries processed',
-    });
+    }, requestId));
   } catch (error) {
     logger.error('Error processing webhook retries', undefined, {
       error: error instanceof Error ? error.message : String(error),
     });
 
-    res.status(500).json({
-      error: {
-        code: 'RETRY_PROCESSING_ERROR',
-        message: 'Failed to process webhook retries',
-      },
-    });
+    res.status(500).json(
+      errorResponse('RETRY_PROCESSING_ERROR', 'Failed to process webhook retries', undefined, requestId)
+    );
   }
 });
 

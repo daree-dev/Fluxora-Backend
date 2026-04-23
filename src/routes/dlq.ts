@@ -79,7 +79,7 @@
  */
 import { Router } from 'express';
 import { authenticate, requireAuth } from '../middleware/auth.js';
-import { asyncHandler } from '../middleware/errorHandler.js';
+import { asyncHandler, validationError } from '../middleware/errorHandler.js';
 import { info, warn } from '../utils/logger.js';
 import { recordAuditEvent } from '../lib/auditLog.js';
 
@@ -129,9 +129,9 @@ export const dlqRouter = Router();
 function requireOperator(req: any, res: any, next: any): void {
   if (req.user?.role !== 'operator') {
     warn('Non-operator attempted DLQ access', { role: req.user?.role, path: req.path });
-    res.status(403).json({
-      error: { code: 'FORBIDDEN', message: 'Operator role required to access the DLQ', requestId: req.id },
-    });
+    res.status(403).json(
+      errorResponse('FORBIDDEN', 'Operator role required to access the DLQ', undefined, req.id)
+    );
     return;
   }
   next();
@@ -156,8 +156,7 @@ dlqRouter.get(
     if (limitParam !== undefined) {
       const parsed = Number.parseInt(String(limitParam), 10);
       if (Number.isNaN(parsed) || parsed < 1 || parsed > 100) {
-        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'limit must be an integer between 1 and 100', requestId } });
-        return;
+        throw validationError('limit must be an integer between 1 and 100');
       }
       limit = parsed;
     }
@@ -166,8 +165,7 @@ dlqRouter.get(
     if (offsetParam !== undefined) {
       const parsed = Number.parseInt(String(offsetParam), 10);
       if (Number.isNaN(parsed) || parsed < 0) {
-        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'offset must be a non-negative integer', requestId } });
-        return;
+        throw validationError('offset must be a non-negative integer');
       }
       offset = parsed;
     }
@@ -196,7 +194,7 @@ dlqRouter.get(
       limit,
       offset,
       has_more: offset + page.length < filtered.length,
-    });
+    }, requestId));
   }),
 );
 
@@ -209,10 +207,10 @@ dlqRouter.get(
   asyncHandler(async (req: any, res: any) => {
     const entry = dlqEntries.find((e) => e.id === req.params.id);
     if (!entry) {
-      res.status(404).json({ error: { code: 'NOT_FOUND', message: `DLQ entry '${req.params.id}' not found`, requestId: req.id } });
+      res.status(404).json(errorResponse('NOT_FOUND', `DLQ entry '${req.params.id}' not found`, undefined, req.id));
       return;
     }
-    res.json({ entry });
+    res.json(successResponse({ entry }, req.id));
   }),
 );
 
@@ -267,12 +265,12 @@ dlqRouter.delete(
   asyncHandler(async (req: any, res: any) => {
     const index = dlqEntries.findIndex((e) => e.id === req.params.id);
     if (index === -1) {
-      res.status(404).json({ error: { code: 'NOT_FOUND', message: `DLQ entry '${req.params.id}' not found`, requestId: req.id } });
+      res.status(404).json(errorResponse('NOT_FOUND', `DLQ entry '${req.params.id}' not found`, undefined, req.id));
       return;
     }
     const [removed] = dlqEntries.splice(index, 1);
     info('DLQ entry acknowledged', { id: removed!.id, requestId: req.id });
-    res.json({ message: 'DLQ entry removed', id: removed!.id });
+    res.json(successResponse({ message: 'DLQ entry removed', id: removed!.id }, req.id));
   }),
 );
 

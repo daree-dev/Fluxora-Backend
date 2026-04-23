@@ -63,17 +63,18 @@ export function createApp(options: AppOptions = {}): Express {
   app.use('/api/admin', adminRouter);
 
   app.get('/', (_req: Request, res: Response) => {
-    res.json({
+    res.json(successResponse({
       name: 'Fluxora API',
       version: '0.1.0',
       docs: 'Programmable treasury streaming on Stellar.',
-    });
+    }));
   });
 
-  app.use((_req: Request, res: Response) => {
-    res.status(404).json({
-      error: { code: 'NOT_FOUND', message: 'The requested resource was not found' },
-    });
+  app.use((req: Request, res: Response) => {
+    const requestId = (req as any).id as string | undefined;
+    res.status(404).json(
+      errorResponse('NOT_FOUND', 'The requested resource was not found', undefined, requestId)
+    );
   });
 
   app.use(errorHandler);
