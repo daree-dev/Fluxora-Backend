@@ -21,7 +21,7 @@ export const healthRouter = Router();
 healthRouter.get('/', (req: Request, res: Response) => {
   // Return 503 during graceful shutdown
   if (isShuttingDown()) {
-    return res.status(503).json(
+    res.status(503).json(
       successResponse({
         status: 'shutting_down',
         service: 'fluxora-backend',
@@ -31,6 +31,7 @@ healthRouter.get('/', (req: Request, res: Response) => {
         message: 'Service is shutting down',
       })
     );
+    return;
   }
 
   const config = req.app.locals.config as Config | undefined;
