@@ -211,7 +211,7 @@ function normalizeCreateInput(body: Record<string, unknown>): NormalizedCreateIn
     const formatted = formatZodIssues(parseResult.issues);
     throw new ApiError(
       ApiErrorCode.VALIDATION_ERROR,
-      'Validation failed',
+      formattedErrors[0]?.message ?? 'Validation failed',
       400,
       formatted.map((e) => e.message).join('; '),
     );
@@ -232,13 +232,13 @@ function normalizeCreateInput(body: Record<string, unknown>): NormalizedCreateIn
     );
   }
 
-  const depositResult = validateDecimalString(depositAmount, 'depositAmount');
+  const depositResult = validateDecimalString(depositAmount ?? '0', 'depositAmount');
   const validatedDeposit = depositResult.valid && depositResult.value ? depositResult.value : '0';
   if (depositAmount !== undefined && parseFloat(validatedDeposit) <= 0) {
     throw validationError('depositAmount must be greater than zero');
   }
 
-  const rateResult = validateDecimalString(ratePerSecond, 'ratePerSecond');
+  const rateResult = validateDecimalString(ratePerSecond ?? '0', 'ratePerSecond');
   const validatedRate = rateResult.valid && rateResult.value ? rateResult.value : '0';
   if (ratePerSecond !== undefined && parseFloat(validatedRate) < 0) {
     throw validationError('ratePerSecond cannot be negative');
@@ -315,6 +315,11 @@ streamsRouter.get(
     const cursor = parseCursor(req.query.cursor);
     const includeTotal = parseIncludeTotal(req.query.include_total);
 
+    // Indexed filters
+    const statusFilter    = req.query.status    as string | undefined;
+    const senderFilter    = req.query.sender    as string | undefined;
+    const recipientFilter = req.query.recipient as string | undefined;
+
     if (streamListingDependency.state !== 'healthy') {
       warn('Stream listing dependency unavailable', { dependency: 'stream-list-view', requestId });
       throw serviceUnavailable('Stream list is temporarily unavailable. Retry when dependency health is restored.');
@@ -355,7 +360,7 @@ streamsRouter.get(
     if (includeTotal && result!.total !== undefined) response.total       = result!.total;
     if (nextCursor)                                  response.next_cursor = nextCursor;
 
-    res.json(successResponse(response, requestId));
+    res.json(response);
   }),
 );
 
@@ -432,7 +437,7 @@ streamsRouter.post(
       info('Replaying idempotent stream creation', { requestId, idempotencyKey, streamId: existingResponse.body.id });
       res.set('Idempotency-Key', idempotencyKey);
       res.set('Idempotency-Replayed', 'true');
-      res.status(existingResponse.statusCode).json(successResponse(existingResponse.body, requestId));
+      res.status(existingResponse.statusCode).json(existingResponse.body);
       return;
     }
 
@@ -477,7 +482,7 @@ streamsRouter.post(
 
     res.set('Idempotency-Key', idempotencyKey);
     res.set('Idempotency-Replayed', 'false');
-    res.status(201).json(successResponse(stream, requestId));
+    res.status(201).json(stream);
   }),
 );
 
@@ -520,7 +525,7 @@ streamsRouter.delete(
     info('Stream cancelled', { id, requestId });
     recordAuditEvent('STREAM_CANCELLED', 'stream', id, (req as any).correlationId);
 
-    res.json(successResponse({ message: 'Stream cancelled', id }, requestId));
+    res.json({ message: 'Stream cancelled', id });
   }),
 );
 
