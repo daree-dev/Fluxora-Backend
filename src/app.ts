@@ -7,13 +7,11 @@ import { auditRouter } from './routes/audit.js';
 import { adminRouter } from './routes/admin.js';
 import { dlqRouter } from './routes/dlq.js';
 import { authRouter } from './routes/auth.js';
-import { metricsRouter } from './routes/metrics.js';
 import { correlationIdMiddleware } from './middleware/correlationId.js';
 import { corsAllowlistMiddleware } from './middleware/cors.js';
 import { requestLoggerMiddleware } from './middleware/requestLogger.js';
 import { errorHandler } from './middleware/errorHandler.js';
-import { bodySizeLimitMiddleware, BODY_LIMIT_BYTES } from './middleware/requestProtection.js';
-import { createHelmetMiddleware } from './middleware/helmet.js';
+import { bodySizeLimitMiddleware, requestTimeoutMiddleware, BODY_LIMIT_BYTES } from './middleware/requestProtection.js';
 import { httpMetrics } from './middleware/httpMetrics.js';
 import { isShuttingDown } from './shutdown.js';
 import { createRateLimiter } from './middleware/rateLimiter.js';
@@ -26,13 +24,22 @@ export interface AppOptions {
   includeTestRoutes?: boolean;
   /** Environment variables used to seed the rate-limiter (defaults to process.env). */
   env?: Record<string, string | undefined>;
+  /** Socket-level request timeout in ms (defaults to 30000). */
+  requestTimeoutMs?: number;
 }
 
 export function createApp(options: AppOptions = {}): Express {
   const app = express();
   const env = options.env ?? (process.env as Record<string, string | undefined>);
   const rateLimiter = createRateLimiter(env);
-  const { ip, apiKey, admin } = getRateLimitConfig(env);
+
+  // Inject config and healthManager into app.locals for route handlers
+  if (options.config) {
+    app.locals.config = options.config;
+  }
+  if (options.healthManager) {
+    app.locals.healthManager = options.healthManager;
+  }
 
   app.use(createHelmetMiddleware());
   app.use(bodySizeLimitMiddleware);
@@ -41,10 +48,7 @@ export function createApp(options: AppOptions = {}): Express {
   app.use(correlationIdMiddleware);
   app.use(corsAllowlistMiddleware);
   app.use(requestLoggerMiddleware);
-
-  // HTTP metrics must be mounted before route handlers to capture all requests
   app.use(httpMetrics);
-
   app.use(rateLimiter);
 
   app.use((_req: Request, res: Response, next: NextFunction) => {
@@ -58,27 +62,6 @@ export function createApp(options: AppOptions = {}): Express {
     app.get('/__test/error', () => {
       throw new Error('Intentional test error');
     });
-
-    app.get('/__test/timeout', async (req: Request, res: Response, next: NextFunction) => {
-      try {
-        await new Promise<void>((resolve, reject) => {
-          // Simulate a long running operation
-          const timer = setTimeout(() => resolve(), 5000);
-
-          // Listen to the abort signal to halt operation
-          req.abortSignal.addEventListener('abort', () => {
-            clearTimeout(timer);
-            reject(new Error('Operation aborted by signal'));
-          });
-        });
-
-        if (!res.headersSent) {
-          res.json({ success: true });
-        }
-      } catch (err) {
-        next(err);
-      }
-    });
   }
 
   // Metrics endpoint - no auth required for Prometheus scraping
@@ -91,6 +74,7 @@ export function createApp(options: AppOptions = {}): Express {
   app.use('/internal/indexer', indexerRouter);
   app.use('/api/audit', auditRouter);
   app.use('/admin/dlq', dlqRouter);
+  app.use('/api/rate-limits', createRateLimitsRouter(env));
 
   app.get('/', (_req: Request, res: Response) => {
     res.json(
@@ -104,11 +88,9 @@ export function createApp(options: AppOptions = {}): Express {
 
   app.use((req: Request, res: Response) => {
     const requestId = (req as any).id as string | undefined;
-    res
-      .status(404)
-      .json(
-        errorResponse('NOT_FOUND', 'The requested resource was not found', undefined, requestId),
-      );
+    res.status(404).json(
+      errorResponse('NOT_FOUND', 'The requested resource was not found', undefined, requestId),
+    );
   });
 
   app.use(errorHandler);
