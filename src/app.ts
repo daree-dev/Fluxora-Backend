@@ -41,6 +41,7 @@ export function createApp(options: AppOptions = {}): Express {
     app.locals.healthManager = options.healthManager;
   }
 
+  app.use(createHelmetMiddleware());
   app.use(bodySizeLimitMiddleware);
   app.use(express.json({ limit: BODY_LIMIT_BYTES }));
   // Correlation ID must be first so all subsequent middleware/routes have req.correlationId.
@@ -63,6 +64,9 @@ export function createApp(options: AppOptions = {}): Express {
     });
   }
 
+  // Metrics endpoint - no auth required for Prometheus scraping
+  app.use('/metrics', metricsRouter);
+
   app.use('/health', healthRouter);
   app.use('/api/auth', authRouter);
   app.use('/api/streams', streamsRouter);
@@ -73,11 +77,13 @@ export function createApp(options: AppOptions = {}): Express {
   app.use('/api/rate-limits', createRateLimitsRouter(env));
 
   app.get('/', (_req: Request, res: Response) => {
-    res.json(successResponse({
-      name: 'Fluxora API',
-      version: '0.1.0',
-      docs: 'Programmable treasury streaming on Stellar.',
-    }));
+    res.json(
+      successResponse({
+        name: 'Fluxora API',
+        version: '0.1.0',
+        docs: 'Programmable treasury streaming on Stellar.',
+      }),
+    );
   });
 
   app.use((req: Request, res: Response) => {
