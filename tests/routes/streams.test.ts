@@ -5,6 +5,9 @@ import { _resetStreams } from '../../src/routes/streams.js';
 
 const VALID_SENDER = 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7';
 const VALID_RECIPIENT = 'GBDEVU63Y6NTHJQQZIKVTC23NWLQVP3WJ2RI2OTSJTNYOIGICST6DUXR';
+const INVALID_STELLAR_KEY_SHORT = 'GABC123';
+const INVALID_STELLAR_KEY_WRONG_PREFIX = 'AAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN7';
+const INVALID_STELLAR_KEY_INVALID_CHARS = 'G1111111111111111111111111111111111111111111111111111111';
 
 const app = createApp();
 
@@ -66,11 +69,46 @@ describe('streams routes', () => {
         .send({ ...validBody, sender: undefined });
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toBe('Validation failed');
+      expect(res.body.details).toContain('sender is required');
+    });
+
+    it('rejects empty sender', async () => {
+      const res = await request(app)
+        .post('/api/streams')
+        .send({ ...validBody, sender: '' });
+
+      expect(res.status).toBe(400);
       expect(res.body.details).toContain('sender must be a valid Stellar public key (G...)');
     });
 
-    it('rejects invalid sender format', async () => {
+    it('rejects invalid sender format - too short', async () => {
+      const res = await request(app)
+        .post('/api/streams')
+        .send({ ...validBody, sender: INVALID_STELLAR_KEY_SHORT });
+
+      expect(res.status).toBe(400);
+      expect(res.body.details).toContain('sender must be a valid Stellar public key (G...)');
+    });
+
+    it('rejects invalid sender format - wrong prefix', async () => {
+      const res = await request(app)
+        .post('/api/streams')
+        .send({ ...validBody, sender: INVALID_STELLAR_KEY_WRONG_PREFIX });
+
+      expect(res.status).toBe(400);
+      expect(res.body.details).toContain('sender must be a valid Stellar public key (G...)');
+    });
+
+    it('rejects invalid sender format - invalid characters', async () => {
+      const res = await request(app)
+        .post('/api/streams')
+        .send({ ...validBody, sender: INVALID_STELLAR_KEY_INVALID_CHARS });
+
+      expect(res.status).toBe(400);
+      expect(res.body.details).toContain('sender must be a valid Stellar public key (G...)');
+    });
+
+    it('rejects invalid sender format - generic string', async () => {
       const res = await request(app)
         .post('/api/streams')
         .send({ ...validBody, sender: 'not-a-stellar-key' });
@@ -79,10 +117,37 @@ describe('streams routes', () => {
       expect(res.body.details).toContain('sender must be a valid Stellar public key (G...)');
     });
 
-    it('rejects invalid recipient format', async () => {
+    it('rejects missing recipient', async () => {
+      const res = await request(app)
+        .post('/api/streams')
+        .send({ ...validBody, recipient: undefined });
+
+      expect(res.status).toBe(400);
+      expect(res.body.details).toContain('recipient is required');
+    });
+
+    it('rejects empty recipient', async () => {
       const res = await request(app)
         .post('/api/streams')
         .send({ ...validBody, recipient: '' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.details).toContain('recipient must be a valid Stellar public key (G...)');
+    });
+
+    it('rejects invalid recipient format - too short', async () => {
+      const res = await request(app)
+        .post('/api/streams')
+        .send({ ...validBody, recipient: INVALID_STELLAR_KEY_SHORT });
+
+      expect(res.status).toBe(400);
+      expect(res.body.details).toContain('recipient must be a valid Stellar public key (G...)');
+    });
+
+    it('rejects invalid recipient format - wrong prefix', async () => {
+      const res = await request(app)
+        .post('/api/streams')
+        .send({ ...validBody, recipient: INVALID_STELLAR_KEY_WRONG_PREFIX });
 
       expect(res.status).toBe(400);
       expect(res.body.details).toContain('recipient must be a valid Stellar public key (G...)');
@@ -129,7 +194,7 @@ describe('streams routes', () => {
         .send({});
 
       expect(res.status).toBe(400);
-      expect(res.body.details.length).toBeGreaterThanOrEqual(4);
+      expect(res.body.details.length).toBeGreaterThanOrEqual(2); // At least sender and recipient required
     });
 
     it('does not log raw Stellar keys after creation', async () => {

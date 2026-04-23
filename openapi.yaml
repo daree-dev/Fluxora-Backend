@@ -1126,12 +1126,18 @@ components:
       properties:
         sender:
           type: string
-          description: Stellar public key of the sender (starts with G, 56 chars)
+          description: |
+            Stellar public key of the sender.
+            Must start with 'G' followed by exactly 55 base32 characters [A-Z2-7].
+            Total length: 56 characters.
           pattern: '^G[A-Z2-7]{55}$'
           example: GBBD47UZQ5CYVVEUVRYNQZX3G5KRZTAYF5XSVS2UKMCCWW5LJJLXNVQX
         recipient:
           type: string
-          description: Stellar public key of the recipient (starts with G, 56 chars)
+          description: |
+            Stellar public key of the recipient.
+            Must start with 'G' followed by exactly 55 base32 characters [A-Z2-7].
+            Total length: 56 characters.
           pattern: '^G[A-Z2-7]{55}$'
           example: GBRPYHIL2CI3WHZDTOOQFC6EB4KJJGUJJBBX7XNLG5DBNVQWDADUZSQX
         depositAmount:
@@ -1167,11 +1173,17 @@ components:
           example: stream-1704067200
         sender:
           type: string
-          description: Sender's Stellar public key
+          description: |
+            Sender's Stellar public key.
+            Format: G followed by 55 base32 characters [A-Z2-7].
+          pattern: '^G[A-Z2-7]{55}$'
           example: GBBD47UZQ5CYVVEUVRYNQZX3G5KRZTAYF5XSVS2UKMCCWW5LJJLXNVQX
         recipient:
           type: string
-          description: Recipient's Stellar public key
+          description: |
+            Recipient's Stellar public key.
+            Format: G followed by 55 base32 characters [A-Z2-7].
+          pattern: '^G[A-Z2-7]{55}$'
           example: GBRPYHIL2CI3WHZDTOOQFC6EB4KJJGUJJBBX7XNLG5DBNVQWDADUZSQX
         depositAmount:
           type: string
