@@ -11,6 +11,11 @@ import {
   type EnhancedRetryPolicy 
 } from '../src/webhooks/retry.js';
 import type { WebhookEvent } from '../src/webhooks/types.js';
+import {
+  computeWebhookSignature,
+  verifyWebhookSignature,
+} from '../src/webhooks/signature.js';
+import { recordAuditEvent, getAuditEntries, _resetAuditLog } from '../src/lib/auditLog.js';
 
 // Mock fetch for testing
 const originalFetch = global.fetch;
