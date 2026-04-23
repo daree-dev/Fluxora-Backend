@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { assessIndexerHealth, DEFAULT_INDEXER_STALL_THRESHOLD_MS } from '../indexer/stall.js';
+import { getIndexerHealth } from './indexer.js';
 import { HealthCheckManager } from '../config/health.js';
 import { Logger } from '../config/logger.js';
 import { Config } from '../config/env.js';
@@ -13,24 +14,28 @@ export const healthRouter = Router();
  */
 healthRouter.get('/', (req: Request, res: Response) => {
   const config = req.app.locals.config as Config | undefined;
-  let indexer;
+  let indexerStall;
   try {
-    indexer = assessIndexerHealth({ thresholdMs: DEFAULT_INDEXER_STALL_THRESHOLD_MS });
+    indexerStall = assessIndexerHealth({ thresholdMs: DEFAULT_INDEXER_STALL_THRESHOLD_MS });
   } catch {
-    indexer = { status: 'unknown' };
+    indexerStall = { status: 'unknown' };
   }
   const status =
-    indexer.status === 'stalled' || indexer.status === 'starting' ? 'degraded' : 'ok';
-  res.json(
-    successResponse({
-      status,
-      service: 'fluxora-backend',
-      network: config?.stellarNetwork ?? 'unknown',
-      contractAddresses: config?.contractAddresses ?? {},
-      timestamp: new Date().toISOString(),
-      indexer,
-    })
-  );
+    indexerStall.status === 'stalled' || indexerStall.status === 'starting' ? 'degraded' : 'ok';
+
+  const indexerHealth = getIndexerHealth();
+
+  res.json({
+    status,
+    service: 'fluxora-backend',
+    network: config?.stellarNetwork ?? 'unknown',
+    contractAddresses: config?.contractAddresses ?? {},
+    timestamp: new Date().toISOString(),
+    indexer: indexerStall,
+    dependencies: {
+      indexer: indexerHealth,
+    },
+  });
 });
 
 /**
