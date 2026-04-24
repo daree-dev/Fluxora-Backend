@@ -137,6 +137,13 @@ List streams with cursor-based pagination.
 }
 ```
 
+- `total` is only present when `include_total=true`. It reflects the current count at response time and is not a snapshot guarantee.
+- `next_cursor` is only present when `has_more` is `true`.
+
+**Indexed filters:**
+
+The `status`, `sender`, and `recipient` filters map directly to database indexes (`idx_streams_status`, `idx_streams_sender`, `idx_streams_recipient`). Combining filters with cursor pagination is safe — the cursor position is relative to the filtered result set.
+
 ### GET /api/streams/:id
 
 Get a single stream by ID.

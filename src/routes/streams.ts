@@ -208,7 +208,7 @@ function parseIncludeTotal(includeTotalParam: unknown): boolean {
   if (Array.isArray(includeTotalParam) || typeof includeTotalParam !== 'string') {
     throw validationError('include_total must be true or false');
   }
-  if (includeTotalParam === 'true')  return true;
+  if (includeTotalParam === 'true') return true;
   if (includeTotalParam === 'false') return false;
   throw validationError('include_total must be true or false');
 }
@@ -222,7 +222,7 @@ function normalizeCreateInput(body: Record<string, unknown>): NormalizedCreateIn
     const formatted = formatZodIssues(parseResult.issues);
     throw new ApiError(
       ApiErrorCode.VALIDATION_ERROR,
-      'Validation failed',
+      formattedErrors[0]?.message ?? 'Validation failed',
       400,
       formatted.map((e) => e.message).join('; '),
     );
@@ -243,13 +243,13 @@ function normalizeCreateInput(body: Record<string, unknown>): NormalizedCreateIn
     );
   }
 
-  const depositResult = validateDecimalString(depositAmount, 'depositAmount');
+  const depositResult = validateDecimalString(depositAmount ?? '0', 'depositAmount');
   const validatedDeposit = depositResult.valid && depositResult.value ? depositResult.value : '0';
   if (depositAmount !== undefined && parseFloat(validatedDeposit) <= 0) {
     throw validationError('depositAmount must be greater than zero');
   }
 
-  const rateResult = validateDecimalString(ratePerSecond, 'ratePerSecond');
+  const rateResult = validateDecimalString(ratePerSecond ?? '0', 'ratePerSecond');
   const validatedRate = rateResult.valid && rateResult.value ? rateResult.value : '0';
   if (ratePerSecond !== undefined && parseFloat(validatedRate) < 0) {
     throw validationError('ratePerSecond cannot be negative');
@@ -321,10 +321,15 @@ export function _resetStreams(): void {
 streamsRouter.get(
   '/',
   asyncHandler(async (req: any, res: any) => {
-    const requestId    = req.id as string | undefined;
-    const limit        = parseLimit(req.query.limit);
-    const cursor       = parseCursor(req.query.cursor);
+    const requestId = req.id as string | undefined;
+    const limit = parseLimit(req.query.limit);
+    const cursor = parseCursor(req.query.cursor);
     const includeTotal = parseIncludeTotal(req.query.include_total);
+
+    // Indexed filters
+    const statusFilter    = req.query.status    as string | undefined;
+    const senderFilter    = req.query.sender    as string | undefined;
+    const recipientFilter = req.query.recipient as string | undefined;
 
     if (streamListingDependency.state !== 'healthy') {
       warn('Stream listing dependency unavailable', { dependency: 'stream-list-view', requestId });
@@ -366,7 +371,7 @@ streamsRouter.get(
     if (includeTotal && result!.total !== undefined) response.total       = result!.total;
     if (nextCursor)                                  response.next_cursor = nextCursor;
 
-    res.json(successResponse(response, requestId));
+    res.json(response);
   }),
 );
 
@@ -406,10 +411,8 @@ streamsRouter.post(
   requireAuth,
   requireIdempotencyKey,
   asyncHandler(async (req: Request, res: Response) => {
-    const requestId      = (req as any).id as string | undefined;
-    const correlationId  = (req as any).correlationId as string | undefined;
-    // Key already validated and trimmed by requireIdempotencyKey middleware
-    const idempotencyKey = res.locals['idempotencyKey'] as string;
+    const requestId = (req as any).id as string | undefined;
+    const idempotencyKey = parseIdempotencyKey(req.header('Idempotency-Key'));
 
     if (idempotencyDependency.state !== 'healthy') {
       warn('Idempotency dependency unavailable', {
@@ -466,7 +469,7 @@ streamsRouter.post(
       });
       res.set('Idempotency-Key', idempotencyKey);
       res.set('Idempotency-Replayed', 'true');
-      res.status(existingResponse.statusCode).json(idempotentReplayResponse(existingResponse.body, requestId));
+      res.status(existingResponse.statusCode).json(existingResponse.body);
       return;
     }
 
@@ -511,7 +514,7 @@ streamsRouter.post(
 
     res.set('Idempotency-Key', idempotencyKey);
     res.set('Idempotency-Replayed', 'false');
-    res.status(201).json(successResponse(stream, requestId));
+    res.status(201).json(stream);
   }),
 );
 
@@ -524,7 +527,7 @@ streamsRouter.delete(
   authenticate,
   requireAuth,
   asyncHandler(async (req: Request, res: Response) => {
-    const { id }    = req.params;
+    const { id } = req.params;
     const requestId = (req as any).id as string | undefined;
     debug('Cancelling stream', { id });
 
@@ -554,7 +557,7 @@ streamsRouter.delete(
     info('Stream cancelled', { id, requestId });
     recordAuditEvent('STREAM_CANCELLED', 'stream', id, (req as any).correlationId);
 
-    res.json(successResponse({ message: 'Stream cancelled', id }, requestId));
+    res.json({ message: 'Stream cancelled', id });
   }),
 );
 
@@ -569,7 +572,7 @@ streamsRouter.delete(
 streamsRouter.patch(
   '/:id/status',
   asyncHandler(async (req: Request, res: Response) => {
-    const { id }    = req.params;
+    const { id } = req.params;
     const requestId = (req as any).id as string | undefined;
     const { status: newStatus } = req.body ?? {};
 
